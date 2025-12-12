@@ -3,8 +3,8 @@
 [![CI](https://github.com/goettemar/cindergrace-pipeline-gui/workflows/CI/badge.svg)](https://github.com/goettemar/cindergrace-pipeline-gui/actions)
 [![codecov](https://codecov.io/gh/goettemar/cindergrace-pipeline-gui/branch/main/graph/badge.svg)](https://codecov.io/gh/goettemar/cindergrace-pipeline-gui)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-188%20passed-success)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-29%25-yellow)](htmlcov/index.html)
+[![Tests](https://img.shields.io/badge/tests-253%20passed-success)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-31%25-yellow)](htmlcov/index.html)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **AI-powered video production pipeline** - Professional Gradio GUI for ComfyUI with Flux Dev and Wan 2.2 integration.
@@ -16,8 +16,8 @@
 ## 🎯 Features at a Glance
 
 ### 🧪 Production-Ready Quality
-- **188 Tests** - Unit & integration tests with 100% pass rate
-- **29% Coverage** - Growing test suite (target: 75%+)
+- **253 Tests** - Unit & integration tests with 100% pass rate
+- **31% Coverage** - Growing test suite (target: 75%+)
 - **CI/CD Pipeline** - GitHub Actions with Python 3.10, 3.11, 3.12
 - **Code Quality** - Automated linting, formatting, type checking
 - **Pre-commit Hooks** - Automatic code formatting before commits
