@@ -431,3 +431,63 @@ class TestConfigManagerDefaultConfig:
         assert default["log_level"] == "INFO"
         assert default["max_concurrent_jobs"] == 1
         assert default["auto_save_results"] is True
+
+
+class TestConfigManagerMissingCoverage:
+    """Test remaining uncovered methods"""
+
+    @pytest.mark.unit
+    def test_get_output_dir(self, tmp_path):
+        """Should get output directory from config"""
+        # Arrange
+        config_file = tmp_path / "settings.json"
+        manager = ConfigManager(str(config_file))
+        manager.config["output_dir"] = "my_custom_output"
+
+        # Act
+        result = manager.get_output_dir()
+
+        # Assert
+        assert result == "my_custom_output"
+
+    @pytest.mark.unit
+    def test_get_output_dir_default(self, tmp_path):
+        """Should return default output dir if not set"""
+        # Arrange
+        config_file = tmp_path / "settings.json"
+        manager = ConfigManager(str(config_file))
+        manager.config.pop("output_dir", None)
+
+        # Act
+        result = manager.get_output_dir()
+
+        # Assert
+        assert result == "output"
+
+    @pytest.mark.unit
+    def test_get_log_level(self, tmp_path):
+        """Should get log level from config"""
+        # Arrange
+        config_file = tmp_path / "settings.json"
+        manager = ConfigManager(str(config_file))
+        manager.config["log_level"] = "DEBUG"
+
+        # Act
+        result = manager.get_log_level()
+
+        # Assert
+        assert result == "DEBUG"
+
+    @pytest.mark.unit
+    def test_get_log_level_default(self, tmp_path):
+        """Should return default log level if not set"""
+        # Arrange
+        config_file = tmp_path / "settings.json"
+        manager = ConfigManager(str(config_file))
+        manager.config.pop("log_level", None)
+
+        # Act
+        result = manager.get_log_level()
+
+        # Assert
+        assert result == "INFO"
