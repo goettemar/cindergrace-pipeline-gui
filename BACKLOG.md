@@ -139,6 +139,9 @@
 - [ ] **Stop/Abort Button** - No UI button to cancel running generation
   - Workaround: Ctrl+C in terminal
   - Impact: User experience
+- [ ] **Refresh-sicherer Start/Stop (Keyframe Generator)** - UI reset nach Reload vorhanden, aber Stop/Resume weiterhin experimentell
+  - Workaround: Nicht neu laden während der Laufzeit; Stop nur experimentell nutzen
+  - Impact: Laufende Jobs können bei Refresh verloren gehen
 
 - [ ] **Live Progress Updates** - Progress only updates at task completion
   - Workaround: Check terminal for live updates

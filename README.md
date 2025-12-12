@@ -1,9 +1,11 @@
 # CINDERGRACE Pipeline GUI
 
-[![CI](https://github.com/goettemar/cindergrace-pipeline-gui/workflows/CI%20Pipeline/badge.svg)](https://github.com/goettemar/cindergrace-pipeline-gui/actions)
+[![CI](https://github.com/goettemar/cindergrace-pipeline-gui/workflows/CI/badge.svg)](https://github.com/goettemar/cindergrace-pipeline-gui/actions)
+[![codecov](https://codecov.io/gh/goettemar/cindergrace-pipeline-gui/branch/main/graph/badge.svg)](https://codecov.io/gh/goettemar/cindergrace-pipeline-gui)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://img.shields.io/badge/tests-104%20passed-success)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-23%25-yellow)](htmlcov/index.html)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-76+-brightgreen.svg)](tests/)
 
 **AI-powered video production pipeline** - Professional Gradio GUI for ComfyUI with Flux Dev and Wan 2.2 integration.
 
@@ -14,11 +16,12 @@
 ## 🎯 Features at a Glance
 
 ### 🧪 Production-Ready Quality
-- **76+ Tests** - Unit & integration tests with comprehensive fixtures
+- **104 Tests** - Unit & integration tests with 100% pass rate
+- **23% Coverage** - Growing test suite (target: 75%+)
 - **CI/CD Pipeline** - GitHub Actions with Python 3.10, 3.11, 3.12
 - **Code Quality** - Automated linting, formatting, type checking
 - **Pre-commit Hooks** - Automatic code formatting before commits
-- **80%+ Target Coverage** - Robust test suite for core modules
+- **Codecov Integration** - Visual coverage tracking and PR comments
 
 ### 🛡️ Enterprise-Grade Infrastructure
 - **Input Validation** - Pydantic validators for all user inputs
@@ -143,6 +146,19 @@ The GUI will open at: **http://127.0.0.1:7860**
 6. **Tests / Debug (🧪 Test ComfyUI)** – Bleibt weiterhin vom Projekt entkoppelt und speichert nach `cindergrace_gui/output/test/`.
 
 Damit bleiben alle produktionsrelevanten Artefakte direkt bei ComfyUI, während die GUI selbst weitgehend stateless bleibt.
+
+## 🧭 Projektverwaltung UI (Überblick)
+- Oben eine kompakte Statuszeile zeigt aktives Projekt, gewähltes Storyboard und Auflösung.
+- Zwei Bereiche (Desktop nebeneinander, Mobile untereinander):
+  - **Projekt:** aktuelles Projekt kompakt, Projekt wechseln/neu anlegen, `project.json` als einklappbare Details.
+  - **Projekt-Defaults:** Storyboard- und Auflösungs-Dropdown mit einem Button „Defaults anwenden“.
+- Storyboard und Auflösung gelten global und werden von allen Tabs übernommen.
+
+## 🎬 Keyframe Generator UI (Überblick)
+- Statuszeile unter dem Titel mit Projekt, Storyboard (gekürzt), Auflösung und ComfyUI-URL.
+- Zwei Karten (Desktop nebeneinander): **Setup** (Load Storyboard, Workflow/Seeds) und **Run** (Start, Stop experimentell, Resume deaktiviert).
+- Zusatz-Hinweis: Stop/Resume sind nicht refresh-sicher (V1); beim Reload erscheint eine Warnung.
+- Storyboard-Info und Checkpoint-Info als Accordions; Gallery im eigenen Bereich mit gleich großen Secondary-Buttons für Clear/Open Output.
 
 ## 📋 First Test
 

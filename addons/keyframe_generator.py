@@ -48,87 +48,109 @@ class KeyframeGeneratorAddon(BaseAddon):
 
         with gr.Blocks() as interface:
             gr.Markdown("# 🎬 Keyframe Generator - Phase 1")
-            gr.Markdown("Generate multiple keyframe variants for each shot in your storyboard")
+            gr.HTML(
+                """
+                <script>
+                  window.addEventListener('beforeunload', function (e) {
+                    const confirmationMessage = 'Stop/Start ist nicht refresh-sicher. Wirklich neu laden?';
+                    (e || window.event).returnValue = confirmationMessage;
+                    return confirmationMessage;
+                  });
+                </script>
+                <style>
+                  .inline-row { gap: 6px; }
+                  .icon-button button { min-width: 38px; max-width: 42px; min-height: 38px; padding: 6px; }
+                  .primary-full button { width: 100%; }
+                  .secondary-full button { width: 100%; min-height: 40px; }
+                  .status-line { font-weight: 600; }
+                </style>
+                """
+            )
 
-            # Configuration Section
-            with gr.Group():
-                gr.Markdown("## ⚙️ Configuration")
-                project_status = gr.Markdown(self._project_status_md())
-                refresh_project_btn = gr.Button("🔄 Projektstatus aktualisieren", size="sm")
+            # Statuszeile
+            status_bar = gr.Markdown(self._status_bar())
 
-                with gr.Row():
-                    comfy_url = gr.Textbox(
-                        value=self.config.get_comfy_url(),
-                        label="ComfyUI URL",
-                        placeholder="http://127.0.0.1:8188"
-                    )
+            with gr.Row():
+                # Left card: Setup
+                with gr.Column():
+                    with gr.Group():
+                        gr.Markdown("### ⚙️ Setup")
+                        project_status = gr.Markdown(self._project_status_md())
+                        refresh_project_btn = gr.Button("↻ Projektstatus", variant="secondary", elem_classes=["icon-button"])
 
-                storyboard_info_md = gr.Markdown(self._current_storyboard_md())
-                gr.Markdown("Storyboard wird im Tab 📁 Projektverwaltung gewählt.")
+                        comfy_url = gr.Textbox(
+                            value=self.config.get_comfy_url(),
+                            label="ComfyUI URL",
+                            placeholder="http://127.0.0.1:8188",
+                            interactive=False
+                        )
 
-                with gr.Row(equal_height=True):
-                    workflow_dropdown = gr.Dropdown(
-                        choices=self._get_available_workflows(),
-                        value=self._get_default_workflow(),
-                        label="Workflow Template",
-                        info="Flux workflow to use for generation",
-                        scale=9
-                    )
-                    refresh_workflow_btn = gr.Button("🔄", size="sm", scale=1, min_width=60)
+                        storyboard_info_md = gr.Markdown(self._current_storyboard_md())
+                        gr.Markdown("Storyboard wird im Tab 📁 Projektverwaltung gewählt.")
 
-                with gr.Row():
-                    variants_per_shot = gr.Slider(
-                        minimum=1,
-                        maximum=10,
-                        value=4,
-                        step=1,
-                        label="Variants per Shot",
-                        info="Number of keyframe variants to generate for each shot"
-                    )
-                    base_seed = gr.Number(
-                        value=2000,
-                        label="Base Seed",
-                        precision=0,
-                        info="Starting seed (will increment for each variant)"
-                    )
+                        with gr.Row(elem_classes=["inline-row"]):
+                            workflow_dropdown = gr.Dropdown(
+                                choices=self._get_available_workflows(),
+                                value=self._get_default_workflow(),
+                                label="Workflow Template",
+                                info="Flux workflow to use for generation",
+                                scale=8
+                            )
+                            refresh_workflow_btn = gr.Button("↻", variant="secondary", elem_classes=["icon-button"], scale=1, min_width=42)
 
-                load_storyboard_btn = gr.Button("📖 Load Storyboard", variant="secondary")
+                        with gr.Row():
+                            variants_per_shot = gr.Slider(
+                                minimum=1,
+                                maximum=10,
+                                value=4,
+                                step=1,
+                                label="Variants per Shot",
+                                info="Number of keyframe variants to generate for each shot"
+                            )
+                            base_seed = gr.Number(
+                                value=2000,
+                                label="Base Seed",
+                                precision=0,
+                                info="Starting seed (will increment for each variant)"
+                            )
 
-            # Storyboard Info Section
-            with gr.Accordion("📋 Storyboard Info (Click to expand)", open=False):
-                storyboard_info = gr.Code(
-                    label="Loaded Storyboard Details",
-                    language="json",
-                    value="{}",
-                    lines=20,
-                    max_lines=20,
-                    interactive=False
-                )
+                        load_storyboard_btn = gr.Button("📖 Load Storyboard", variant="primary", elem_classes=["primary-full"])
 
-            gr.Markdown("---")
+                        with gr.Accordion("📋 Storyboard Info", open=False):
+                            storyboard_info = gr.Code(
+                                label="Loaded Storyboard Details",
+                                language="json",
+                                value="{}",
+                                lines=20,
+                                max_lines=20,
+                                interactive=False
+                            )
 
-            # Generation Control Section
-            with gr.Group():
-                gr.Markdown("## 🚀 Generation Control")
+                # Right card: Run
+                with gr.Column():
+                    with gr.Group():
+                        gr.Markdown("### 🚀 Run")
+                        gr.Markdown("**Hinweis:** Start funktioniert, Stop ist experimentell, Resume deaktiviert (nicht refresh-sicher). Bitte Seite nicht neu laden. Robuster Job-Manager folgt in V2.")
 
-                with gr.Row():
-                    start_btn = gr.Button("▶️ Start Generation", variant="primary", size="lg")
-                    stop_btn = gr.Button("⏹️ Stop", variant="stop", size="lg")
-                    resume_btn = gr.Button("⏯️ Resume from Checkpoint", variant="secondary", size="lg")
+                        with gr.Row():
+                            start_btn = gr.Button("▶️ Start Generation", variant="primary", elem_classes=["primary-full"])
+                        with gr.Row(elem_classes=["inline-row"]):
+                            stop_btn = gr.Button("⏹️ Stop (experimentell)", variant="stop", elem_classes=["secondary-full"])
+                            resume_btn = gr.Button("⏯️ Resume (deaktiviert)", variant="secondary", interactive=False, elem_classes=["secondary-full"])
 
-                status_text = gr.Markdown("**Status:** Ready - Load a storyboard to begin")
+                        status_text = gr.Markdown("**Status:** Ready - Load a storyboard to begin")
 
-                with gr.Accordion("Progress Details", open=True):
-                    progress_details = gr.Markdown("No generation in progress")
+                        with gr.Accordion("Progress Details", open=True):
+                            progress_details = gr.Markdown("No generation in progress")
 
-            gr.Markdown("---")
+                        with gr.Accordion("💾 Checkpoint Info", open=False):
+                            checkpoint_info = gr.JSON(label="Checkpoint Status", value={})
 
             # Results Section
             with gr.Group():
                 gr.Markdown("## 🖼️ Generated Keyframes")
 
-                with gr.Row():
-                    current_shot_display = gr.Markdown("**Current Shot:** None")
+                current_shot_display = gr.Markdown("**Current Shot:** None")
 
                 keyframe_gallery = gr.Gallery(
                     label="Keyframes (All Variants)",
@@ -139,18 +161,14 @@ class KeyframeGeneratorAddon(BaseAddon):
                     object_fit="contain"
                 )
 
-                with gr.Row():
-                    clear_gallery_btn = gr.Button("🗑️ Clear Gallery")
-                    open_output_btn = gr.Button("📁 Open Output Folder")
-
-            # Checkpoint Section
-            with gr.Accordion("💾 Checkpoint Info", open=False):
-                checkpoint_info = gr.JSON(label="Checkpoint Status", value={})
+                with gr.Row(elem_classes=["inline-row"]):
+                    clear_gallery_btn = gr.Button("🗑️ Clear Gallery", variant="secondary", elem_classes=["secondary-full"])
+                    open_output_btn = gr.Button("📁 Open Output Folder", variant="secondary", elem_classes=["secondary-full"])
 
             # Event Handlers
             load_storyboard_btn.click(
-                fn=self.load_storyboard_from_config,
-                outputs=[storyboard_info, status_text]
+                fn=self._load_storyboard_with_status,
+                outputs=[storyboard_info, status_text, status_bar]
             )
 
             start_btn.click(
@@ -194,8 +212,13 @@ class KeyframeGeneratorAddon(BaseAddon):
             )
 
             refresh_project_btn.click(
-                fn=lambda: self._project_status_md(),
-                outputs=[project_status]
+                fn=lambda: (self._project_status_md(), self._status_bar()),
+                outputs=[project_status, status_bar]
+            )
+
+            interface.load(
+                fn=self._reset_controls,
+                outputs=[start_btn, stop_btn, resume_btn, status_text, progress_details]
             )
 
         return interface
@@ -656,6 +679,76 @@ class KeyframeGeneratorAddon(BaseAddon):
         except Exception as e:
             print(f"✗ Failed to load checkpoint: {e}")
             return None
+
+    def _checkpoint_exists(self) -> bool:
+        """Soft check if a checkpoint file exists for current storyboard."""
+        try:
+            storyboard_file = self.config.get_current_storyboard()
+            if not storyboard_file:
+                return False
+            project = self.project_manager.get_active_project(refresh=True)
+            if not project:
+                return False
+            checkpoint_dir = self.project_manager.ensure_dir(project, "checkpoints")
+            base_name = os.path.splitext(os.path.basename(storyboard_file))[0]
+            checkpoint_name = f"{base_name}_checkpoint.json"
+            checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
+            return os.path.exists(checkpoint_path)
+        except Exception:
+            return False
+
+    def _reset_controls(self):
+        """Reset UI controls to idle state on load."""
+        self.stop_requested = False
+        self.is_running = False
+        status = "**Status:** Bereit. Start kann erneut gedrückt werden."
+        progress_md = "No generation in progress"
+        return (
+            gr.update(interactive=True),  # start_btn
+            gr.update(interactive=False),  # stop_btn
+            gr.update(interactive=False),  # resume_btn (deaktiviert in V1)
+            status,
+            progress_md,
+        )
+
+    # -----------------------------
+    # UI helpers
+    # -----------------------------
+    def _status_bar(self) -> str:
+        """Compact status line similar to project tab."""
+        project = self.project_manager.get_active_project(refresh=True)
+        storyboard = self.config.get_current_storyboard()
+        width, height = self.config.get_resolution_tuple()
+        comfy_url = self.config.get_comfy_url()
+
+        parts = []
+        if project:
+            badge = "✅" if os.path.isdir(project.get("path", "")) else "⚠️"
+            parts.append(f"Projekt: {badge} {project.get('name')} (`{project.get('slug')}`)")
+        else:
+            parts.append("Projekt: ⚠️ keines gewählt")
+
+        if storyboard:
+            sb_badge = "✅" if os.path.exists(storyboard) else "⚠️"
+            parts.append(f"Storyboard: {sb_badge} `{self._short_storyboard_path(storyboard)}`")
+        else:
+            parts.append("Storyboard: ⚠️ keines gesetzt")
+
+        parts.append(f"Auflösung: {width}x{height}")
+        parts.append(f"ComfyUI: {comfy_url}")
+        return " | ".join(parts)
+
+    def _short_storyboard_path(self, abs_path: str) -> str:
+        if not abs_path:
+            return abs_path
+        marker = "/output/"
+        if marker in abs_path:
+            return abs_path.split(marker, 1)[-1]
+        return os.path.basename(abs_path)
+
+    def _load_storyboard_with_status(self):
+        storyboard_json, status = self.load_storyboard_from_config()
+        return storyboard_json, status, self._status_bar()
 
     def _copy_images_from_comfyui(self, filename_prefix: str, gui_output_dir: str) -> List[str]:
         """

@@ -19,6 +19,7 @@ from domain.exceptions import (
     WorkflowTimeoutError,
 )
 from infrastructure.logger import get_logger
+from .workflow_updater import WorkflowUpdater
 
 logger = get_logger(__name__)
 
@@ -36,6 +37,7 @@ class ComfyUIAPI:
         self.server_url = server_url.rstrip('/')
         self.ws_url = self.server_url.replace('http', 'ws')
         self.client_id = str(uuid.uuid4())
+        self.workflow_updater = WorkflowUpdater()
 
     def test_connection(self) -> Dict[str, Any]:
         """
@@ -121,19 +123,28 @@ class ComfyUIAPI:
                 seed=1001,
                 steps=20,
                 cfg=7.0,
-                filename_prefix="test_001"
+                filename_prefix="test_001",
+                width=1280,
+                height=720,
+                startframe_path="/tmp/frame.png",
+                num_frames=72,
             )
         """
-        # Deep copy to avoid mutating the base workflow between variants
-        # Using copy.deepcopy() instead of JSON round-trip (2-3x faster)
-        workflow = copy.deepcopy(workflow)
+        try:
+            return self.workflow_updater.update(workflow, **params)
+        except Exception as exc:
+            logger.warning(f"WorkflowUpdater failed, falling back to legacy updater: {exc}")
+            return self._legacy_update_workflow_params(workflow, **params)
 
-        # Find nodes by class_type and update parameters
-        for node_id, node_data in workflow.items():
+    def _legacy_update_workflow_params(self, workflow: Dict[str, Any], **params: Any) -> Dict[str, Any]:
+        """
+        Backward-compatible parameter injection kept as a safety net.
+        """
+        workflow_copy = copy.deepcopy(workflow)
+        for node_id, node_data in workflow_copy.items():
             node_type = node_data.get("class_type", "")
             inputs = node_data.get("inputs", {})
 
-            # Update RandomNoise node (seed) - for Flux workflows
             if node_type == "RandomNoise":
                 if "seed" in params:
                     if "noise_seed" in inputs:
@@ -141,49 +152,40 @@ class ComfyUIAPI:
                     if "seed" in inputs:
                         inputs["seed"] = params["seed"]
 
-            # Update KSampler node (seed, steps, cfg) - for older workflows
             elif node_type == "KSampler":
-                if "seed" in params:
-                    if "seed" in inputs:
-                        inputs["seed"] = params["seed"]
-                if "steps" in params:
+                if "seed" in params and "seed" in inputs:
+                    inputs["seed"] = params["seed"]
+                if "steps" in params and "steps" in inputs:
                     inputs["steps"] = params["steps"]
-                if "cfg" in params:
+                if "cfg" in params and "cfg" in inputs:
                     inputs["cfg"] = params["cfg"]
 
-            # Update BasicScheduler node (steps) - for Flux workflows
             elif node_type == "BasicScheduler":
-                if "steps" in params:
+                if "steps" in params and "steps" in inputs:
                     inputs["steps"] = params["steps"]
 
-            # Update CLIPTextEncode node (prompt)
             elif node_type == "CLIPTextEncode":
                 if "prompt" in params:
-                    # Update text prompt
                     inputs["text"] = params["prompt"]
 
-            # Update SaveImage node (filename_prefix)
             elif node_type == "SaveImage":
                 if "filename_prefix" in params:
                     inputs["filename_prefix"] = params["filename_prefix"]
 
-            # Update EmptyLatentImage node (width, height) - for resolution
             elif node_type == "EmptyLatentImage":
-                if "width" in params:
+                if "width" in params and "width" in inputs:
                     inputs["width"] = params["width"]
-                if "height" in params:
+                if "height" in params and "height" in inputs:
                     inputs["height"] = params["height"]
 
-            # Generic seed injection (safety net)
             if "seed" in params:
                 for key in ("seed", "noise_seed"):
                     if key in inputs:
                         inputs[key] = params["seed"]
 
-            # Attach back mutated inputs
             node_data["inputs"] = inputs
 
-        return workflow
+        return workflow_copy
 
     def queue_prompt(self, workflow: Dict[str, Any]) -> str:
         """

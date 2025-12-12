@@ -372,6 +372,8 @@ class TestConfigManagerResolutionPresets:
         ("1080p_portrait", (1080, 1920)),
         ("720p_landscape", (1280, 720)),
         ("720p_portrait", (720, 1280)),
+        ("540p_landscape", (960, 540)),
+        ("540p_portrait", (540, 960)),
     ])
     def test_all_resolution_presets(self, tmp_path, preset, expected):
         """Should return correct dimensions for all presets"""

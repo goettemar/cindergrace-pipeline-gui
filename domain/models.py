@@ -91,6 +91,8 @@ class SelectionEntry:
 class SelectionSet:
     project: str
     selections: List[SelectionEntry]
+    total_shots: Optional[int] = None
+    exported_at: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -99,6 +101,8 @@ class SelectionSet:
         return cls(
             project=payload.get("project", ""),
             selections=entries,
+            total_shots=payload.get("total_shots"),
+            exported_at=payload.get("exported_at"),
             raw=payload,
         )
 
