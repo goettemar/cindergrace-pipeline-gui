@@ -1,0 +1,42 @@
+{
+  "project": "Test Project",
+  "shots": [
+    {
+      "shot_id": "001",
+      "filename_base": "cathedral-interior",
+      "prompt": "gothic cathedral interior, dramatic lighting, volumetric rays",
+      "width": 1024,
+      "height": 576,
+      "duration": 3.0,
+      "camera_movement": "slow_push",
+      "wan_motion": {
+        "type": "macro_dolly",
+        "strength": 0.6,
+        "notes": "Small forward move with slight handheld sway"
+      }
+    },
+    {
+      "shot_id": "002",
+      "filename_base": "hand-book",
+      "prompt": "close-up of pale hand with silver rings holding ancient book",
+      "width": 1024,
+      "height": 576,
+      "duration": 2.5,
+      "camera_movement": "static"
+    },
+    {
+      "shot_id": "003",
+      "filename_base": "window-rain",
+      "prompt": "rain streaming down gothic window, dark clouds outside",
+      "width": 1024,
+      "height": 576,
+      "duration": 5.0,
+      "camera_movement": "slow_pan"
+    }
+  ],
+  "video_settings": {
+    "default_fps": 24,
+    "default_workflow": "Wan 2.2 14B i2v.json",
+    "max_duration": 3.0
+  }
+}
