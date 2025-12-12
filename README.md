@@ -1,8 +1,48 @@
-# CINDERGRACE GUI - Quick Start
+# CINDERGRACE Pipeline GUI
 
-Welcome to the CINDERGRACE Pipeline Control GUI!
+[![CI](https://github.com/goettemar/cindergrace-pipeline-gui/workflows/CI%20Pipeline/badge.svg)](https://github.com/goettemar/cindergrace-pipeline-gui/actions)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-76+-brightgreen.svg)](tests/)
 
-## ✨ System Features (v0.5.1 - NEW!)
+**AI-powered video production pipeline** - Professional Gradio GUI for ComfyUI with Flux Dev and Wan 2.2 integration.
+
+🔗 **[GitHub Repository](https://github.com/goettemar/cindergrace-pipeline-gui)** | 📖 **[Documentation](CONTRIBUTING.md)** | 🧪 **[Testing Guide](TESTING.md)**
+
+---
+
+## 🎯 Features at a Glance
+
+### 🧪 Production-Ready Quality
+- **76+ Tests** - Unit & integration tests with comprehensive fixtures
+- **CI/CD Pipeline** - GitHub Actions with Python 3.10, 3.11, 3.12
+- **Code Quality** - Automated linting, formatting, type checking
+- **Pre-commit Hooks** - Automatic code formatting before commits
+- **80%+ Target Coverage** - Robust test suite for core modules
+
+### 🛡️ Enterprise-Grade Infrastructure
+- **Input Validation** - Pydantic validators for all user inputs
+- **Structured Logging** - Centralized logging with rotation (10MB, 5 backups)
+- **Error Handling** - Custom exception hierarchy with decorators
+- **State Persistence** - UI state survives browser refreshes
+- **File Locking** - Prevents race conditions on concurrent access
+
+### 🎬 Video Production Pipeline
+- **Modular Architecture** - 6 self-contained addon tabs
+- **Project-Centric Storage** - All artifacts organized by project
+- **Keyframe Generation** - Flux Dev integration with variants
+- **Video Synthesis** - Wan 2.2 with LastFrame chaining for long clips
+- **Interactive Selection** - Gallery-based variant comparison
+
+### 🔧 Developer Experience
+- **Clean Architecture** - Domain/Infrastructure/Services separation
+- **Type Safety** - Full type hints with mypy validation
+- **Hot Reload** - Gradio supports live development
+- **Comprehensive Docs** - CONTRIBUTING.md, TESTING.md, API docs
+
+---
+
+## ✨ System Features (v0.5.1)
 
 ### 🛡️ Input Validation mit Pydantic
 - **Automatische Validierung** aller User-Eingaben (Projektnamen, FPS, Seeds, URLs)
