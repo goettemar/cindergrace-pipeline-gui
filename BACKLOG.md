@@ -37,45 +37,64 @@
   - **Files:** `infrastructure/comfy_api.py`, new `infrastructure/comfy_api/` directory
   - **Impact:** ⭐⭐⭐⭐ Easier to extend with new node types
 
-### Sprint 3: Test Coverage (Next) 📊
+### Sprint 3: Test Coverage (In Progress) 📊
 
-**Goal:** Reach 80%+ overall test coverage
+**Goal:** Reach 75%+ overall test coverage
+**Current:** 29% (228 tests) - Updated Dec 12, 2025
 
-#### Missing Tests
-- [ ] **SelectionService Tests** (Priority: High)
-  - [ ] `test_collect_keyframes()` - Variant collection
-  - [ ] `test_export_selections()` - JSON + file export
-  - [ ] `test_selection_validation()` - Error cases
-  - **Target:** 80%+ coverage
+#### Completed Tests ✅
+- [x] **SelectionService Tests** (Priority: High) - **96% Coverage**
+  - [x] `test_collect_keyframes()` - Variant collection
+  - [x] `test_export_selections()` - JSON + file export
+  - [x] `test_selection_validation()` - Error cases
+  - **Result:** 17 tests, 96% coverage
 
-- [ ] **VideoService Tests** (Priority: High)
-  - [ ] `test_split_into_segments()` - Segmentation logic
-  - [ ] `test_extract_last_frame()` - ffmpeg extraction
-  - [ ] `test_segment_chaining()` - LastFrame workflow
-  - **Target:** 80%+ coverage
+- [x] **VideoService Tests** (Priority: High) - **86-100% Coverage**
+  - [x] `test_split_into_segments()` - Segmentation logic
+  - [x] `test_extract_last_frame()` - ffmpeg extraction
+  - [x] `test_segment_chaining()` - LastFrame workflow
+  - **Result:** LastFrameExtractor 86%, VideoPlanBuilder 100%
 
-- [ ] **ProjectStore Tests** (Priority: Medium)
-  - [ ] `test_create_project()` - Project creation
-  - [ ] `test_get_active_project()` - Project retrieval
-  - [ ] `test_file_locking()` - Concurrent safety
-  - **Target:** 70%+ coverage
+- [x] **ProjectStore Tests** (Priority: Medium) - **98% Coverage**
+  - [x] `test_create_project()` - Project creation
+  - [x] `test_get_active_project()` - Project retrieval
+  - [x] `test_file_locking()` - Concurrent safety
+  - **Result:** 36 tests, 98% coverage
 
-- [ ] **WorkflowRegistry Tests** (Priority: Low)
-  - [ ] `test_load_presets()` - Preset loading
-  - [ ] `test_get_workflows_by_category()` - Filtering
-  - **Target:** 70%+ coverage
+- [x] **WorkflowRegistry Tests** (Priority: Low) - **100% Coverage**
+  - [x] `test_load_presets()` - Preset loading
+  - [x] `test_get_workflows_by_category()` - Filtering
+  - **Result:** 25 tests, 100% coverage
+
+- [x] **StateStore Tests** (Priority: Medium) - **100% Coverage**
+  - [x] State persistence lifecycle
+  - **Result:** 23 tests, 100% coverage
+
+- [x] **ConfigManager Tests** (Priority: Low) - **94% Coverage**
+  - [x] Configuration management
+  - **Result:** 35 tests, 94% coverage
+
+- [x] **ComfyAPI Updaters Tests** (Priority: Medium) - **97% Coverage**
+  - [x] All node updater classes
+  - **Result:** 36 tests, 97% coverage
 
 #### Coverage Goals
-| Module         | Current | Target | Priority |
-|----------------|---------|--------|----------|
-| StoryboardService | ✅ 90%+ | 90%+ | Done |
-| ConfigManager    | ✅ 80%+ | 80%+ | Done |
-| ComfyAPI         | ✅ 70%+ | 70%+ | Done |
-| SelectionService | ❌ 0%   | 80%+ | High |
-| VideoService     | ❌ 0%   | 80%+ | High |
-| ProjectStore     | ❌ 0%   | 70%+ | Medium |
-| WorkflowRegistry | ❌ 0%   | 70%+ | Low |
-| **Overall**      | ~40%    | 75%+ | Goal |
+| Module         | Current | Target | Status |
+|----------------|---------|--------|--------|
+| StoryboardService | ✅ 93%  | 90%+ | Done |
+| ConfigManager    | ✅ 94%  | 80%+ | Done |
+| ComfyAPI Updaters | ✅ 97% | 90%+ | Done |
+| ProjectStore     | ✅ 98%  | 70%+ | Done |
+| WorkflowRegistry | ✅ 100% | 70%+ | Done |
+| StateStore       | ✅ 100% | 70%+ | Done |
+| SelectionService | ✅ 96%  | 80%+ | Done |
+| VideoPlanBuilder | ✅ 100% | 80%+ | Done |
+| LastFrameExtractor | ✅ 86% | 80%+ | Done |
+| KeyframeService  | ⚠️ 44%  | 80%+ | Partial |
+| VideoGenService  | ❌ 15%  | 80%+ | Todo |
+| ModelValidator   | ❌ 19%  | 70%+ | Todo |
+| ComfyAPI Client  | ❌ 12%  | 60%+ | Todo |
+| **Overall**      | **29%** | 75%+ | In Progress |
 
 ### Sprint 4: CI/CD & DevOps 🔧
 
