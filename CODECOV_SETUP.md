@@ -99,8 +99,13 @@ Files changed: 3
 |-------|---------|------|
 | **services/** | 44% avg | 80%+ |
 | **domain/** | 91% | 95%+ |
-| **infrastructure/** | 41% | 70%+ |
-| **GESAMT** | 23% | 75%+ |
+| **infrastructure/** | 62% avg | 70%+ |
+| **GESAMT** | 29% | 75%+ |
+
+**Kürzlich verbessert:**
+- ProjectStore: 25% → 98% ✅
+- WorkflowRegistry: 17% → 100% ✅
+- StateStore: 28% → 100% ✅
 
 ---
 
