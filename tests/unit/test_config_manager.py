@@ -54,6 +54,18 @@ class TestConfigManagerInit:
         # Assert
         assert manager.config["comfy_url"] == "http://127.0.0.1:8188"
         assert "workflow_dir" in manager.config
+        assert manager.config_dir.endswith("missing")
+
+    @pytest.mark.unit
+    def test_init_sets_config_dir_for_default(self, tmp_path, monkeypatch):
+        """Default path should yield config_dir='config' when relative default used."""
+        monkeypatch.chdir(tmp_path)
+        default_path = tmp_path / "config" / "settings.json"
+        default_path.parent.mkdir()
+        default_path.write_text("{}", encoding="utf-8")
+
+        manager = ConfigManager(str(default_path))
+        assert manager.config_dir == str(default_path.parent)
 
 
 class TestConfigManagerLoad:
@@ -149,6 +161,21 @@ class TestConfigManagerSave:
         with open(config_file, encoding='utf-8') as f:
             saved = json.load(f)
         assert saved["german"] == "Überprüfung"
+
+    @pytest.mark.unit
+    def test_save_handles_exception(self, tmp_path, capsys, monkeypatch):
+        """Should print failure message when save raises"""
+        config_file = tmp_path / "settings.json"
+        manager = ConfigManager(str(config_file))
+
+        def fake_open(*_args, **_kwargs):
+            raise PermissionError("no write")
+
+        monkeypatch.setattr("builtins.open", fake_open)
+
+        manager.save()
+        captured = capsys.readouterr()
+        assert "Failed to save config" in captured.out
 
 
 class TestConfigManagerRefresh:

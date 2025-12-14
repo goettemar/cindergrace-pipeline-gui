@@ -143,6 +143,16 @@ class TestSaveVideoUpdater:
         # Assert
         assert node_data["inputs"]["filename_prefix"] == "video_"
 
+    @pytest.mark.unit
+    def test_update_skips_when_prefix_missing(self):
+        """Should not mutate inputs when no prefix provided"""
+        updater = SaveVideoUpdater()
+        node_data = {"inputs": {"existing": 1}}
+
+        updater.update(node_data, {})
+
+        assert node_data["inputs"] == {"existing": 1}
+
 
 class TestRandomNoiseUpdater:
     """Test RandomNoiseUpdater"""
@@ -189,6 +199,16 @@ class TestRandomNoiseUpdater:
         # Assert
         assert node_data["inputs"]["noise_seed"] == 9999
         assert node_data["inputs"]["seed"] == 9999
+
+    @pytest.mark.unit
+    def test_update_returns_when_seed_missing(self):
+        """Should leave inputs untouched if seed not provided"""
+        updater = RandomNoiseUpdater()
+        node_data = {"inputs": {"seed": 123}}
+
+        updater.update(node_data, {})
+
+        assert node_data["inputs"]["seed"] == 123
 
 
 class TestKSamplerUpdater:

@@ -36,7 +36,9 @@ class PipelineLogger:
     def _setup_root_logger(cls):
         """Configure root logger with console and file handlers"""
         root_logger = logging.getLogger("cindergrace")
-        root_logger.setLevel(logging.INFO)
+        # Set to DEBUG so file handler can capture debug messages
+        # Console handler filters to INFO for cleaner output
+        root_logger.setLevel(logging.DEBUG)
 
         # Prevent duplicate handlers
         if root_logger.handlers:

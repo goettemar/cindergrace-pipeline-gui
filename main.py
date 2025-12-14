@@ -1,14 +1,21 @@
 """CINDERGRACE GUI - Main application"""
 import sys
 import os
+import logging
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import gradio as gr
 from addons import load_addons
-from infrastructure.logger import get_logger
+from infrastructure.logger import get_logger, PipelineLogger
 from infrastructure.config_manager import ConfigManager
+
+# Apply log level from config before first log message
+_config = ConfigManager()
+_log_level_str = _config.get_log_level()
+_log_level = getattr(logging, _log_level_str.upper(), logging.INFO)
+PipelineLogger.set_level(_log_level)
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -64,11 +71,25 @@ def create_gui():
                 </div>
                 """)
 
+        # Separate addons by category
+        pipeline_addons = [a for a in addons if a.category == "pipeline"]
+        tool_addons = [a for a in addons if a.category == "tools"]
+
         # Create tabs for each addon
         with gr.Tabs():
-            for addon in addons:
+            # Pipeline addons as top-level tabs
+            for addon in pipeline_addons:
                 with gr.Tab(addon.get_tab_name()):
                     addon.render()
+
+            # Tool addons grouped under Tools tab with sub-tabs
+            if tool_addons:
+                with gr.Tab("🔧 Tools"):
+                    gr.Markdown("## ComfyUI Tools & Utilities")
+                    with gr.Tabs():
+                        for addon in tool_addons:
+                            with gr.Tab(addon.get_tab_name()):
+                                addon.render()
 
         # Footer
         gr.Markdown("""
@@ -124,6 +145,9 @@ def main():
     if comfy_root:
         output_path = os.path.join(os.path.expanduser(comfy_root), "output")
         allowed_paths.append(output_path)
+
+    # Enable queue for long-running operations (video generation can take 10+ minutes)
+    demo.queue(default_concurrency_limit=1)
 
     demo.launch(
         server_name="127.0.0.1",

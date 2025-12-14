@@ -104,5 +104,24 @@ class WorkflowRegistry:
         except Exception as exc:
             return f"**❌ Fehler:** Konnte workflow_presets.json nicht speichern ({exc})"
 
+    def has_preset_file(self) -> bool:
+        """Check if the workflow presets file exists."""
+        return os.path.exists(self.config_path)
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get status information about the workflow registry."""
+        has_file = self.has_preset_file()
+        presets = self._load_presets()
+        categories = presets.get("categories", {})
+
+        return {
+            "preset_file_exists": has_file,
+            "preset_file_path": self.config_path,
+            "workflow_dir": self.workflow_dir,
+            "workflow_dir_exists": os.path.exists(self.workflow_dir),
+            "category_count": len(categories),
+            "categories": list(categories.keys()),
+        }
+
 
 __all__ = ["WorkflowRegistry"]

@@ -375,11 +375,16 @@ class ProjectAddon(BaseAddon):
         else:
             parts.append("Aktives Projekt: ⚠️ keines gewählt")
 
-        # Storyboard
+        # Storyboard - validate path and try to resolve if invalid
         storyboard = self.config.get_current_storyboard()
         if storyboard:
-            sb_badge = "✅" if os.path.exists(storyboard) else "⚠️"
-            parts.append(f"Storyboard: {sb_badge} `{os.path.basename(storyboard)}`")
+            resolved_path = self._resolve_storyboard_path(storyboard)
+            if resolved_path and os.path.exists(resolved_path):
+                sb_badge = "✅"
+                parts.append(f"Storyboard: {sb_badge} `{os.path.basename(resolved_path)}`")
+            else:
+                sb_badge = "❌"
+                parts.append(f"Storyboard: {sb_badge} `{os.path.basename(storyboard)}` **NICHT GEFUNDEN**")
         else:
             parts.append("Storyboard: ⚠️ keines gesetzt")
 
@@ -462,6 +467,39 @@ class ProjectAddon(BaseAddon):
     def _is_comfy_path_valid(self) -> bool:
         path = self.config.get_comfy_root()
         return bool(path) and os.path.exists(path)
+
+    def _resolve_storyboard_path(self, storyboard_path: str) -> Optional[str]:
+        """Try to resolve storyboard path, checking multiple locations."""
+        if not storyboard_path:
+            return None
+
+        # If absolute path exists, use it
+        if os.path.isabs(storyboard_path) and os.path.exists(storyboard_path):
+            return storyboard_path
+
+        # Extract filename for relative resolution
+        filename = os.path.basename(storyboard_path)
+
+        # Try config dir
+        if self.config.config_dir:
+            candidate = os.path.join(self.config.config_dir, filename)
+            if os.path.exists(candidate):
+                return candidate
+
+        # Try active project path
+        project = self.project_manager.get_active_project(refresh=False)
+        if project and project.get("path"):
+            project_path = project["path"]
+            for subdir in ("", "storyboards"):
+                candidate = os.path.join(project_path, subdir, filename) if subdir else os.path.join(project_path, filename)
+                if os.path.exists(candidate):
+                    return candidate
+
+        # If absolute path was given but doesn't exist, return None
+        if os.path.isabs(storyboard_path):
+            return None
+
+        return None
 
     def _reevaluate_lock_state(self, current_status: str):
         valid = self._is_comfy_path_valid()

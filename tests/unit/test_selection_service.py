@@ -401,6 +401,18 @@ class TestSelectionServiceExtractVariant:
         assert SelectionService._extract_variant("test_v-1_00001_.png") is None
 
     @pytest.mark.unit
+    def test_extract_variant_handles_value_error(self, monkeypatch):
+        """Should swallow ValueError when int conversion fails"""
+
+        class FakeMatch:
+            def group(self, _idx):
+                return "not-a-number"
+
+        monkeypatch.setattr("re.search", lambda *_a, **_k: FakeMatch())
+
+        assert SelectionService._extract_variant("anything_v1.png") is None
+
+    @pytest.mark.unit
     def test_extract_variant_multiple_matches(self):
         """Should extract first variant match"""
         # Act - filename with multiple v patterns

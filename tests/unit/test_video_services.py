@@ -213,6 +213,38 @@ class TestLastFrameExtractorExtract:
         call_args = mock_subprocess.call_args[0][0]
         assert "-0.1" in call_args  # Check custom offset
 
+    @pytest.mark.unit
+    @patch('shutil.which')
+    @patch('subprocess.run')
+    @patch('os.path.exists')
+    def test_extract_handles_unexpected_exception(self, mock_exists, mock_subprocess, mock_which, tmp_path):
+        """Should return None on unexpected exception"""
+        cache_dir = tmp_path / "cache"
+        extractor = LastFrameExtractor(str(cache_dir))
+
+        mock_which.return_value = "/usr/bin/ffmpeg"
+        mock_exists.return_value = True
+        mock_subprocess.side_effect = RuntimeError("weird error")
+
+        result = extractor.extract("/path/video.mp4", {"plan_id": "001"})
+        assert result is None
+
+    @pytest.mark.unit
+    @patch('shutil.which')
+    @patch('subprocess.run')
+    @patch('os.path.exists')
+    def test_extract_warns_when_target_missing(self, mock_exists, mock_subprocess, mock_which, tmp_path):
+        """Should return None when output file missing after success"""
+        cache_dir = tmp_path / "cache"
+        extractor = LastFrameExtractor(str(cache_dir))
+
+        mock_which.return_value = "/usr/bin/ffmpeg"
+        mock_exists.side_effect = lambda path: path.endswith(".mp4")  # Video exists, target missing
+        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        result = extractor.extract("/path/video.mp4", {"plan_id": "001"})
+        assert result is None
+
 
 class TestVideoPlanBuilderBuild:
     """Test VideoPlanBuilder.build()"""

@@ -6,16 +6,18 @@ from typing import List, Any
 class BaseAddon(ABC):
     """Abstract base class for all pipeline addons"""
 
-    def __init__(self, name: str, description: str):
+    def __init__(self, name: str, description: str, category: str = "pipeline"):
         """
         Initialize addon
 
         Args:
             name: Display name of the addon
             description: Brief description of addon functionality
+            category: Addon category - "pipeline" for main tabs, "tools" for tools sub-tabs
         """
         self.name = name
         self.description = description
+        self.category = category
         self.enabled = True
 
     @abstractmethod

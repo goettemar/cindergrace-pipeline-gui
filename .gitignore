@@ -63,6 +63,7 @@ config/settings.json
 *.bak
 *.swp
 .cache/
+temp/
 
 # OS
 Thumbs.db
@@ -73,3 +74,9 @@ Thumbs.db
 .env.local
 credentials.json
 secrets.json
+
+# Desktop entries
+*.desktop
+
+# Backup files
+backup/

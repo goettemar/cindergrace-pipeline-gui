@@ -59,6 +59,16 @@ class SettingsAddon(BaseAddon):
 
             with gr.Group():
                 gr.Markdown("## 🧩 Workflow-Presets")
+
+                # Show warning if preset file doesn't exist
+                if not self.registry.has_preset_file():
+                    gr.Markdown(
+                        "⚠️ **Hinweis:** Die Datei `config/workflow_presets.json` fehlt. "
+                        "Die Workflow-Dropdowns zeigen alle verfügbaren JSON-Dateien aus "
+                        "`config/workflow_templates/`. Für kategorisierte Presets (flux/wan) "
+                        "bitte unten die Datei anlegen und speichern."
+                    )
+
                 gr.Markdown(
                     "Hier definierst du, welche Workflow-Dateien in den einzelnen Tabs "
                     "ausgewählt werden dürfen. Kategorien: `flux`, `wan` usw."

@@ -2,24 +2,30 @@
   "categories": {
     "flux": [
       {
+        "name": "Flux Preview Fast",
+        "file": "flux_preview_fast.json",
+        "description": "Schneller Preview (6 Steps, 512px) - zum Testen von Storyboards",
+        "default": false
+      },
+      {
         "name": "Flux Test Simple",
         "file": "flux_test_simple.json",
-        "description": "Default Flux test workflow for Keyframe/Test tabs",
+        "description": "Standard Qualität (20 Steps, 1024px) - für finale Keyframes",
         "default": true
       }
     ],
     "wan": [
       {
-        "name": "Wan 2.2 14B I2V",
-        "file": "Wan 2.2 14B i2v.json",
-        "description": "Image-to-Video base workflow for Phase 3",
-        "default": true
+        "name": "Wan 2.2 5B I2V (schnell)",
+        "file": "Wan2.2 5B i2v.json",
+        "description": "Schnelleres 5B Modell - ideal zum Testen (10 Steps)",
+        "default": false
       },
       {
-        "name": "Wan 2.2 AIO I2V",
-        "file": "Wan 2.2 AIO i2v.json",
-        "description": "All-in-one Wan 2.2 image-to-video workflow (alternativ)",
-        "default": false
+        "name": "Wan 2.2 14B I2V",
+        "file": "Wan 2.2 14B i2v.json",
+        "description": "Hohe Qualität 14B Modell - für finale Videos",
+        "default": true
       }
     ]
   }

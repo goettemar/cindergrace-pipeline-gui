@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, Tuple
 
 from domain.models import Storyboard, SelectionSet
 from domain.exceptions import ValidationError
+from pathlib import Path
 
 
 class StoryboardService:
@@ -115,6 +116,19 @@ class StoryboardService:
         """
         width, height = config_manager.get_resolution_tuple()
         return StoryboardService.apply_global_resolution(storyboard, width, height)
+
+    @staticmethod
+    def save_storyboard(storyboard: Storyboard, file_path: str) -> None:
+        """Save storyboard to JSON file."""
+        data = storyboard.raw or {
+            "project": storyboard.project,
+            "shots": [shot.raw for shot in storyboard.shots],
+            "version": storyboard.version,
+            "description": storyboard.description,
+        }
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 def load_storyboard(path: str) -> Storyboard:

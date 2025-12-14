@@ -1,92 +1,77 @@
-"""Keyframe Generator Addon - Phase 1 of CINDERGRACE Pipeline"""
 import os
 import sys
 import json
-import time
 from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any, Generator
 import gradio as gr
-
-# Ensure parent directory is in path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.base_addon import BaseAddon
-from infrastructure.comfy_api import ComfyUIAPI
 from infrastructure.config_manager import ConfigManager
 from infrastructure.workflow_registry import WorkflowRegistry
 from infrastructure.project_store import ProjectStore
 from infrastructure.logger import get_logger
+from infrastructure.error_handler import handle_errors
+from infrastructure.error_handler import handle_errors
 from domain import models as domain_models
 from domain.storyboard_service import StoryboardService
 from domain.validators import KeyframeGeneratorInput, WorkflowFileInput
+from services.keyframe_service import KeyframeGenerationService, KeyframeService
 
 logger = get_logger(__name__)
-
-
 class KeyframeGeneratorAddon(BaseAddon):
-    """Generate keyframe variants for storyboard shots"""
-
     def __init__(self):
         super().__init__(
             name="Keyframe Generator",
             description="Generate multiple keyframe variants for each storyboard shot"
         )
         self.config = ConfigManager()
-        self.api = None
         self.current_storyboard: Optional[domain_models.Storyboard] = None
-        self.checkpoint_file = None
-        self.is_running = False
-        self.stop_requested = False
         self.workflow_registry = WorkflowRegistry()
         self.project_manager = ProjectStore(self.config)
+        self.keyframe_service = KeyframeService(
+            project_store=self.project_manager,
+            config=self.config,
+            workflow_registry=self.workflow_registry
+        )
+        self.generation_service = KeyframeGenerationService(
+            config=self.config,
+            project_store=self.project_manager
+        )
 
     def get_tab_name(self) -> str:
         return "🎬 Keyframe Generator"
 
     def render(self) -> gr.Blocks:
-        """Render the keyframe generator UI"""
+        # Auto-load storyboard on tab open
+        initial_storyboard_json, initial_status = self.load_storyboard_from_config()
 
         with gr.Blocks() as interface:
             gr.Markdown("# 🎬 Keyframe Generator - Phase 1")
-            gr.HTML(
-                """
-                <script>
-                  window.addEventListener('beforeunload', function (e) {
-                    const confirmationMessage = 'Stop/Start ist nicht refresh-sicher. Wirklich neu laden?';
-                    (e || window.event).returnValue = confirmationMessage;
-                    return confirmationMessage;
-                  });
-                </script>
-                <style>
-                  .inline-row { gap: 6px; }
-                  .icon-button button { min-width: 38px; max-width: 42px; min-height: 38px; padding: 6px; }
-                  .primary-full button { width: 100%; }
-                  .secondary-full button { width: 100%; min-height: 40px; }
-                  .status-line { font-weight: 600; }
-                </style>
-                """
-            )
+            gr.HTML("""<script>
+  window.addEventListener('beforeunload', function (e) {
+    const confirmationMessage = 'Stop/Start ist nicht refresh-sicher. Wirklich neu laden?';
+    (e || window.event).returnValue = confirmationMessage;
+    return confirmationMessage;
+  });
+</script>
+<style>
+  .inline-row { gap: 6px; }
+  .icon-button button { min-width: 38px; max-width: 42px; min-height: 38px; padding: 6px; }
+  .primary-full button { width: 100%; }
+  .secondary-full button { width: 100%; min-height: 40px; }
+  .status-line { font-weight: 600; }
+</style>""")
 
-            # Statuszeile
-            status_bar = gr.Markdown(self._status_bar())
+            # Storyboard info (consistent with other tabs)
+            with gr.Row():
+                storyboard_info = gr.Markdown(self._get_storyboard_info())
+                refresh_btn = gr.Button("↻ Refresh", scale=0, min_width=60)
 
             with gr.Row():
-                # Left card: Setup
                 with gr.Column():
                     with gr.Group():
                         gr.Markdown("### ⚙️ Setup")
-                        project_status = gr.Markdown(self._project_status_md())
-                        refresh_project_btn = gr.Button("↻ Projektstatus", variant="secondary", elem_classes=["icon-button"])
-
-                        comfy_url = gr.Textbox(
-                            value=self.config.get_comfy_url(),
-                            label="ComfyUI URL",
-                            placeholder="http://127.0.0.1:8188",
-                            interactive=False
-                        )
-
-                        storyboard_info_md = gr.Markdown(self._current_storyboard_md())
-                        gr.Markdown("Storyboard wird im Tab 📁 Projektverwaltung gewählt.")
 
                         with gr.Row(elem_classes=["inline-row"]):
                             workflow_dropdown = gr.Dropdown(
@@ -111,22 +96,21 @@ class KeyframeGeneratorAddon(BaseAddon):
                                 value=2000,
                                 label="Base Seed",
                                 precision=0,
-                                info="Starting seed (will increment for each variant)"
+                                minimum=0,
+                                maximum=2147483647,
+                                info="Starting seed (will increment for each variant; 0-2147483647)"
                             )
 
-                        load_storyboard_btn = gr.Button("📖 Load Storyboard", variant="primary", elem_classes=["primary-full"])
-
-                        with gr.Accordion("📋 Storyboard Info", open=False):
-                            storyboard_info = gr.Code(
+                        with gr.Accordion("📋 Storyboard Preview (JSON)", open=False):
+                            storyboard_preview = gr.Code(
                                 label="Loaded Storyboard Details",
                                 language="json",
-                                value="{}",
+                                value=initial_storyboard_json,
                                 lines=20,
                                 max_lines=20,
                                 interactive=False
                             )
 
-                # Right card: Run
                 with gr.Column():
                     with gr.Group():
                         gr.Markdown("### 🚀 Run")
@@ -146,12 +130,9 @@ class KeyframeGeneratorAddon(BaseAddon):
                         with gr.Accordion("💾 Checkpoint Info", open=False):
                             checkpoint_info = gr.JSON(label="Checkpoint Status", value={})
 
-            # Results Section
             with gr.Group():
                 gr.Markdown("## 🖼️ Generated Keyframes")
-
                 current_shot_display = gr.Markdown("**Current Shot:** None")
-
                 keyframe_gallery = gr.Gallery(
                     label="Keyframes (All Variants)",
                     show_label=True,
@@ -160,34 +141,24 @@ class KeyframeGeneratorAddon(BaseAddon):
                     height="auto",
                     object_fit="contain"
                 )
-
                 with gr.Row(elem_classes=["inline-row"]):
                     clear_gallery_btn = gr.Button("🗑️ Clear Gallery", variant="secondary", elem_classes=["secondary-full"])
                     open_output_btn = gr.Button("📁 Open Output Folder", variant="secondary", elem_classes=["secondary-full"])
 
-            # Event Handlers
-            load_storyboard_btn.click(
-                fn=self._load_storyboard_with_status,
-                outputs=[storyboard_info, status_text, status_bar]
+            refresh_btn.click(
+                fn=self._get_storyboard_info,
+                outputs=[storyboard_info]
             )
 
             start_btn.click(
                 fn=self.start_generation,
-                inputs=[
-                    comfy_url,
-                    workflow_dropdown,
-                    variants_per_shot,
-                    base_seed
-                ],
+                inputs=[workflow_dropdown, variants_per_shot, base_seed],
                 outputs=[keyframe_gallery, status_text, progress_details, checkpoint_info, current_shot_display]
             )
 
             resume_btn.click(
                 fn=self.resume_generation,
-                inputs=[
-                    comfy_url,
-                    workflow_dropdown
-                ],
+                inputs=[workflow_dropdown],
                 outputs=[keyframe_gallery, status_text, progress_details, checkpoint_info, current_shot_display]
             )
 
@@ -211,11 +182,6 @@ class KeyframeGeneratorAddon(BaseAddon):
                 outputs=[status_text]
             )
 
-            refresh_project_btn.click(
-                fn=lambda: (self._project_status_md(), self._status_bar()),
-                outputs=[project_status, status_bar]
-            )
-
             interface.load(
                 fn=self._reset_controls,
                 outputs=[start_btn, stop_btn, resume_btn, status_text, progress_details]
@@ -223,499 +189,166 @@ class KeyframeGeneratorAddon(BaseAddon):
 
         return interface
 
+    @handle_errors("Failed to load storyboard", return_tuple=True)
+    def _load_storyboard_model(self, storyboard_file: str) -> domain_models.Storyboard:
+        storyboard = StoryboardService.load_from_config(self.config, filename=storyboard_file)
+        StoryboardService.apply_resolution_from_config(storyboard, self.config)
+        storyboard.raw["storyboard_file"] = storyboard_file
+        return storyboard
+
+    @handle_errors("Ungültige Eingabeparameter", return_tuple=True)
+    def _validate_generation_inputs(self, variants_per_shot: int, base_seed: int, workflow_file: str) -> KeyframeGeneratorInput:
+        validated_inputs = KeyframeGeneratorInput(
+            variants_per_shot=int(variants_per_shot),
+            base_seed=int(base_seed)
+        )
+        WorkflowFileInput(workflow_file=workflow_file)
+        return validated_inputs
+
     def load_storyboard(self, storyboard_file: str) -> Tuple[str, str]:
-        """Load and validate storyboard file.
+        if not storyboard_file or storyboard_file.startswith("No storyboards"):
+            return "{}", "**❌ Error:** No storyboard selected"
 
-        Refactored to use centralized StoryboardService.
-        """
-        try:
-            if not storyboard_file or storyboard_file.startswith("No storyboards"):
-                return "{}", "**❌ Error:** No storyboard selected"
+        storyboard, error = self._load_storyboard_model(storyboard_file)
+        if error:
+            return "{}", error
 
-            # Use centralized service for loading
-            storyboard = StoryboardService.load_from_config(
-                self.config,
-                filename=storyboard_file
-            )
-
-            # Apply global resolution override from project settings
-            StoryboardService.apply_resolution_from_config(storyboard, self.config)
-
-            # Store metadata and reference
-            storyboard.raw["storyboard_file"] = storyboard_file
-            self.current_storyboard = storyboard
-
-            # Format storyboard as pretty JSON string for display
-            storyboard_json = json.dumps(storyboard.raw, indent=2)
-
-            # Create status message
-            total_shots = len(storyboard.shots)
-            project_name = storyboard.project or "Unknown"
-            status = f"**✅ Loaded:** {project_name} - {total_shots} shots"
-
-            return storyboard_json, status
-
-        except Exception as e:
-            logger.error(f"Failed to load storyboard: {e}", exc_info=True)
-            return "{}", f"**❌ Error:** Failed to load storyboard: {str(e)}"
+        self.current_storyboard = storyboard
+        storyboard_json = json.dumps(storyboard.raw, indent=2)
+        total_shots = len(storyboard.shots)
+        project_name = storyboard.project or "Unknown"
+        status = f"**✅ Loaded:** {project_name} - {total_shots} shots"
+        return storyboard_json, status
 
     def load_storyboard_from_config(self) -> Tuple[str, str]:
-        """Load storyboard using selection from project tab.
+        storyboard_file = self.config.get_current_storyboard()
+        if not storyboard_file:
+            return "{}", "**❌ Error:** Kein Storyboard gesetzt. Bitte im Tab '📁 Projekt' auswählen."
 
-        Refactored to use centralized StoryboardService.
-        """
-        try:
-            # Load using centralized service (handles config refresh internally)
-            storyboard = StoryboardService.load_from_config(self.config)
+        storyboard, error = self._load_storyboard_model(storyboard_file)
+        if error:
+            return "{}", error
 
-            # Apply global resolution override
-            StoryboardService.apply_resolution_from_config(storyboard, self.config)
-
-            # Store reference
-            storyboard_file = self.config.get_current_storyboard()
-            storyboard.raw["storyboard_file"] = storyboard_file
-            self.current_storyboard = storyboard
-
-            # Format for display
-            storyboard_json = json.dumps(storyboard.raw, indent=2)
-            total_shots = len(storyboard.shots)
-            project_name = storyboard.project or "Unknown"
-            status = f"**✅ Loaded:** {project_name} - {total_shots} shots"
-
-            return storyboard_json, status
-
-        except Exception as e:
-            logger.error(f"Failed to load storyboard from config: {e}", exc_info=True)
-            return "{}", f"**❌ Error:** {str(e)}"
+        self.current_storyboard = storyboard
+        storyboard_json = json.dumps(storyboard.raw, indent=2)
+        total_shots = len(storyboard.shots)
+        project_name = storyboard.project or "Unknown"
+        status = f"**✅ Loaded:** {project_name} - {total_shots} shots"
+        return storyboard_json, status
 
     def start_generation(
         self,
-        comfy_url: str,
         workflow_file: str,
         variants_per_shot: int,
         base_seed: int,
         progress=gr.Progress(track_tqdm=True)
     ) -> Generator[Tuple[List[str], str, str, Dict, str], None, None]:
-        """Start keyframe generation from beginning (streaming updates)."""
-        try:
-            self.config.refresh()
-            storyboard_file = self.config.get_current_storyboard()
-            if not storyboard_file:
-                yield [], "**❌ Error:** Kein Storyboard gesetzt. Bitte im Tab '📁 Projekt' auswählen.", "No storyboard", {}, "No shot"
-                return
+        self.config.refresh()
+        storyboard_file = self.config.get_current_storyboard()
+        if not storyboard_file:
+            yield [], "**❌ Error:** Kein Storyboard gesetzt. Bitte im Tab '📁 Projekt' auswählen.", "No storyboard", {}, "No shot"
+            return
 
-            # Validate inputs with Pydantic
-            validated_inputs = KeyframeGeneratorInput(
-                variants_per_shot=int(variants_per_shot),
-                base_seed=int(base_seed)
-            )
-            WorkflowFileInput(workflow_file=workflow_file)
+        project = self.project_manager.get_active_project(refresh=True)
+        if not project:
+            yield [], "**❌ Error:** Kein aktives Projekt. Bitte zuerst im Tab '📁 Projekt' auswählen.", "No project", {}, "No shot"
+            return
 
-            logger.info(f"Starting keyframe generation: {validated_inputs.variants_per_shot} variants, seed {validated_inputs.base_seed}")
+        validated_inputs, validation_error = self._validate_generation_inputs(variants_per_shot, base_seed, workflow_file)
+        if validation_error:
+            yield [], validation_error, "Ungültige Eingabeparameter", {}, "Error"
+            return
 
-            self.stop_requested = False
-            project = self.project_manager.get_active_project(refresh=True)
-            if not project:
-                yield [], "**❌ Error:** Kein aktives Projekt. Bitte zuerst im Tab '📁 Projekt' auswählen.", "No project", {}, "No shot"
-                return
-
-            # Load storyboard if not already loaded
-            if self.current_storyboard is None:
-                sb_json, load_status = self.load_storyboard(storyboard_file)
-                if "Error" in load_status:
-                    yield [], load_status, "No progress", {}, "No shot"
-                    return
-
-            # Initialize checkpoint
-            checkpoint = {
-                "storyboard_file": storyboard_file,
-                "workflow_file": workflow_file,
-                "variants_per_shot": validated_inputs.variants_per_shot,
-                "base_seed": validated_inputs.base_seed,
-                "started_at": datetime.now().isoformat(),
-                "completed_shots": [],
-                "current_shot": None,
-                "total_images_generated": 0,
-                "status": "running"
-            }
-
-            # Save checkpoint
-            self._save_checkpoint(checkpoint, storyboard_file, project)
-
-            # Stream generation
-            yield from self._run_generation(comfy_url, workflow_file, checkpoint, project, progress)
-
-        except Exception as e:
-            error_msg = f"**❌ Error:** {str(e)}"
-            logger.error(f"Keyframe generation failed: {e}", exc_info=True)
-            yield [], error_msg, "Generation failed", {}, "Error"
-
-    def resume_generation(
-        self,
-        comfy_url: str,
-        workflow_file: str,
-        progress=gr.Progress(track_tqdm=True)
-    ) -> Generator[Tuple[List[str], str, str, Dict, str], None, None]:
-        """Resume generation from checkpoint (streaming updates)."""
-        try:
-            self.config.refresh()
-            storyboard_file = self.config.get_current_storyboard()
-            if not storyboard_file:
-                yield [], "**❌ Error:** Kein Storyboard gesetzt. Bitte im Tab '📁 Projekt' auswählen.", "No storyboard", {}, "No shot"
-                return
-            self.stop_requested = False
-            project = self.project_manager.get_active_project(refresh=True)
-            if not project:
-                yield [], "**❌ Error:** Kein aktives Projekt. Bitte im Tab '📁 Projekt' auswählen.", "No project", {}, "No shot"
-                return
-
-            # Load checkpoint
-            checkpoint = self._load_checkpoint(storyboard_file, project)
-
-            if not checkpoint:
-                yield [], "**❌ Error:** No checkpoint found. Start a new generation first.", "No checkpoint", {}, "None"
-                return
-
-            if checkpoint.get("status") == "completed":
-                yield [], "**✅ Info:** Generation already completed. Start a new generation or load existing keyframes.", "Already complete", checkpoint, "Complete"
-                return
-
-            # Load storyboard
+        if self.current_storyboard is None:
             _, load_status = self.load_storyboard(storyboard_file)
             if "Error" in load_status:
                 yield [], load_status, "No progress", {}, "No shot"
                 return
 
-            # Resume generation
-            checkpoint["status"] = "running"
-            checkpoint["resumed_at"] = datetime.now().isoformat()
+        checkpoint = self.keyframe_service.prepare_checkpoint(
+            storyboard=self.current_storyboard,
+            workflow_file=workflow_file,
+            variants_per_shot=validated_inputs.variants_per_shot,
+            base_seed=validated_inputs.base_seed
+        )
 
-            yield from self._run_generation(comfy_url, workflow_file, checkpoint, project, progress)
+        self._save_checkpoint(checkpoint, storyboard_file, project)
 
-        except Exception as e:
-            error_msg = f"**❌ Error:** {str(e)}"
-            yield [], error_msg, "Resume failed", {}, "Error"
+        # Get ComfyUI URL from settings
+        comfy_url = self.config.get_comfy_url()
 
-    def _run_generation(
+        yield from self.generation_service.run_generation(
+            storyboard=self.current_storyboard,
+            workflow_file=workflow_file,
+            checkpoint=checkpoint,
+            project=project,
+            comfy_url=comfy_url,
+            progress_callback=progress
+        )
+
+    def resume_generation(
         self,
-        comfy_url: str,
         workflow_file: str,
-        checkpoint: Dict,
-        project: Dict[str, Any],
-        progress=None
+        progress=gr.Progress(track_tqdm=True)
     ) -> Generator[Tuple[List[str], str, str, Dict, str], None, None]:
-        """Run the actual generation process and stream updates."""
-        try:
-            # Initialize API
-            self.api = ComfyUIAPI(comfy_url)
-            self.is_running = True
-
-            # Test connection
-            conn_result = self.api.test_connection()
-            if not conn_result["connected"]:
-                self.is_running = False
-                yield [], f"**❌ Error:** Connection failed - {conn_result['error']}", "Connection failed", checkpoint, "Error"
-                return
-
-            # Load workflow
-            workflow_path = os.path.join(
-                self.config.get_workflow_dir(),
-                workflow_file
-            )
-
-            if not os.path.exists(workflow_path):
-                yield [], f"**❌ Error:** Workflow not found: `{workflow_path}`", "Workflow missing", checkpoint, "Error"
-                return
-
-            workflow = self.api.load_workflow(workflow_path)
-
-            # Get generation settings
-            variants_per_shot = checkpoint["variants_per_shot"]
-            base_seed = checkpoint["base_seed"]
-            completed_shots = set(checkpoint.get("completed_shots", []))
-
-            # Prepare output directory
-            output_dir = self.project_manager.ensure_dir(project, "keyframes")
-            os.makedirs(output_dir, exist_ok=True)
-
-            all_generated_images = []
-            shots = self.current_storyboard.raw.get("shots", [])
-            total_shots = len(shots)
-            total_images_est = max(1, total_shots * variants_per_shot)
-            images_done = len(completed_shots) * variants_per_shot
-            res_width, res_height = self.config.get_resolution_tuple()
-
-            print(f"\n{'='*60}")
-            print(f"KEYFRAME GENERATION STARTED")
-            print(f"Total Shots: {total_shots}")
-            print(f"Variants per Shot: {variants_per_shot}")
-            print(f"Total Images: {total_shots * variants_per_shot}")
-            print(f"{'='*60}\n")
-
-            # Initial update
-            yield [], "**Status:** 🚀 Starte Keyframe-Generation...", self._format_progress(checkpoint, total_shots), checkpoint, "**Current Shot:** None"
-
-            # Generate keyframes for each shot
-            for shot_idx, shot in enumerate(shots):
-                if self.stop_requested:
-                    checkpoint["status"] = "stopped"
-                    checkpoint["current_shot"] = shot.get("shot_id", f"{shot_idx+1:03d}")
-                    self._save_checkpoint(checkpoint, checkpoint["storyboard_file"], project)
-                    status = "**⏹️ Gestoppt:** Generation wurde vom Benutzer abgebrochen."
-                    progress_details = self._format_progress(checkpoint, total_shots)
-                    self.is_running = False
-                    yield all_generated_images, status, progress_details, checkpoint, f"Stopped at {checkpoint['current_shot']}"
-                    return
-
-                shot_id = shot.get("shot_id", f"{shot_idx+1:03d}")
-
-                # Skip if already completed
-                if self.stop_requested:
-                    checkpoint["status"] = "stopped"
-                    self._save_checkpoint(checkpoint, checkpoint["storyboard_file"], project)
-                    status = "**⏹️ Gestoppt:** Generation wurde vom Benutzer abgebrochen."
-                    progress_details = self._format_progress(checkpoint, total_shots)
-                    return all_generated_images, status, progress_details, checkpoint, f"Stopped at {shot_id}"
-
-                if shot_id in completed_shots:
-                    print(f"⏭️  Skipping shot {shot_id} (already completed)")
-                    continue
-
-                checkpoint["current_shot"] = shot_id
-                current_shot_display = f"**Current Shot:** {shot_id} - {shot.get('description', 'No description')}"
-                checkpoint_progress = self._format_progress(checkpoint, total_shots)
-                progress_details = checkpoint_progress
-                if progress and callable(progress):
-                    progress(
-                        min(0.95, images_done / total_images_est),
-                        desc=f"{shot_id}: Start"
-                    )
-                # Stream update for new shot
-                yield all_generated_images, f"**Status:** ▶️ Shot {shot_id} gestartet", progress_details, checkpoint, current_shot_display
-
-                print(f"\n{'='*60}")
-                print(f"Shot {shot_id} ({shot_idx + 1}/{total_shots})")
-                print(f"Description: {shot.get('description', 'N/A')}")
-                print(f"{'='*60}")
-
-                shot_images = []
-
-                # Get filename base (content-based naming)
-                filename_base = shot.get("filename_base", f"shot_{shot_id}")
-                shot_width = res_width
-                shot_height = res_height
-
-                # Generate variants for this shot
-                for variant_idx in range(variants_per_shot):
-                    variant_seed = base_seed + (shot_idx * variants_per_shot) + variant_idx
-                    variant_name = f"{filename_base}_v{variant_idx+1}"
-
-                    print(f"\n  Generating variant {variant_idx + 1}/{variants_per_shot} (seed {variant_seed})...")
-                    print(f"  Filename: {variant_name}")
-                    logger.info(f"[Keyframe] Shot {shot_id} Variant {variant_idx + 1} Seed {variant_seed}")
-                    if self.stop_requested:
-                        checkpoint["status"] = "stopped"
-                        self._save_checkpoint(checkpoint, checkpoint["storyboard_file"], project)
-                        status = "**⏹️ Gestoppt:** Generation wurde vom Benutzer abgebrochen."
-                        progress_details = self._format_progress(checkpoint, total_shots)
-                        self.is_running = False
-                        yield all_generated_images, status, progress_details, checkpoint, f"Stopped at {shot_id}"
-                        return
-
-                    # Update workflow with shot parameters (including resolution)
-                    updated_workflow = self.api.update_workflow_params(
-                        workflow,
-                        prompt=shot.get("prompt", ""),
-                        seed=variant_seed,
-                        filename_prefix=variant_name,
-                        width=shot_width,
-                        height=shot_height
-                    )
-
-                    try:
-                        # Queue and monitor
-                        prompt_id = self.api.queue_prompt(updated_workflow)
-                        result = self.api.monitor_progress(prompt_id, timeout=300)
-
-                        if result["status"] == "success":
-                            # Prefer downloading directly from API result if available
-                            copied_images = []
-                            api_images = result.get("output_images") or []
-                            if api_images:
-                                copied_images.extend(self._copy_images_list(api_images, output_dir))
-                            # Copy images from ComfyUI output to GUI output
-                            copied_images.extend(self._copy_images_from_comfyui(variant_name, output_dir))
-                            copied_images = self._dedup_paths(copied_images)
-
-                            if copied_images:
-                                shot_images.extend(copied_images)
-                                all_generated_images.extend(copied_images)
-                                checkpoint["total_images_generated"] += len(copied_images)
-                                print(f"  ✓ Generated and copied variant {variant_idx + 1} ({len(copied_images)} images)")
-                                images_done += len(copied_images)
-                                if progress and callable(progress):
-                                    progress(
-                                        min(0.99, images_done / total_images_est),
-                                        desc=f"{shot_id}: Variant {variant_idx + 1}/{variants_per_shot}"
-                                    )
-                                # Stream variant-level update
-                                variant_progress = self._format_progress(checkpoint, total_shots)
-                                yield all_generated_images, f"**Status:** 🖼️ {shot_id} Variant {variant_idx + 1} fertig", variant_progress, checkpoint, current_shot_display
-                            else:
-                                print(f"  ⚠️  Generated but failed to copy variant {variant_idx + 1}")
-                        else:
-                            error_msg = result.get("error", "Unknown error")
-                            print(f"  ✗ Failed variant {variant_idx + 1}: {error_msg}")
-
-                    except Exception as e:
-                        print(f"  ✗ Error generating variant {variant_idx + 1}: {e}")
-                        continue
-
-                # Mark shot as completed
-                checkpoint["completed_shots"].append(shot_id)
-                self._save_checkpoint(checkpoint, checkpoint["storyboard_file"], project)
-
-                progress_details = self._format_progress(checkpoint, total_shots)
-                yield all_generated_images, f"**Status:** ✅ Shot {shot_id} abgeschlossen", progress_details, checkpoint, current_shot_display
-
-                print(f"\n✓ Completed shot {shot_id}: {len(shot_images)} images generated")
-
-            # Mark as completed
-            checkpoint["status"] = "completed"
-            checkpoint["completed_at"] = datetime.now().isoformat()
-            self._save_checkpoint(checkpoint, checkpoint["storyboard_file"], project)
-
-            status = f"**✅ Generation Complete!** Generated {checkpoint['total_images_generated']} keyframes for {len(checkpoint['completed_shots'])} shots"
-            progress_details = self._format_progress(checkpoint, total_shots)
-
-            print(f"\n{'='*60}")
-            print(f"GENERATION COMPLETE")
-            print(f"Total Images: {checkpoint['total_images_generated']}")
-            print(f"Output: {output_dir}")
-            print(f"{'='*60}\n")
-
-            self.is_running = False
-            self.stop_requested = False
-            yield all_generated_images, status, progress_details, checkpoint, "Complete"
+        self.config.refresh()
+        storyboard_file = self.config.get_current_storyboard()
+        if not storyboard_file:
+            yield [], "**❌ Error:** Kein Storyboard gesetzt. Bitte im Tab '📁 Projekt' auswählen.", "No storyboard", {}, "No shot"
             return
 
-        except Exception as e:
-            checkpoint["status"] = "error"
-            checkpoint["error"] = str(e)
-            self._save_checkpoint(checkpoint, checkpoint["storyboard_file"], project)
-            self.is_running = False
-            self.stop_requested = False
+        project = self.project_manager.get_active_project(refresh=True)
+        if not project:
+            yield [], "**❌ Error:** Kein aktives Projekt. Bitte im Tab '📁 Projekt' auswählen.", "No project", {}, "No shot"
+            return
 
-            error_msg = f"**❌ Error:** {str(e)}"
-            yield [], error_msg, "Generation failed", checkpoint, "Error"
+        checkpoint = self._load_checkpoint(storyboard_file, project)
+        if not checkpoint:
+            yield [], "**❌ Error:** No checkpoint found. Start a new generation first.", "No checkpoint", {}, "None"
+            return
 
-    def stop_generation(self):
-        """Request to stop the current generation loop."""
-        if self.is_running:
-            self.stop_requested = True
-            return "**⏹️ Stop angefordert:** Warte auf laufenden Shot.", "Stop wird ausgeführt..."
-        self.stop_requested = False
-        return "**ℹ️ Kein Lauf aktiv.**", "Kein aktiver Fortschritt."
+        if checkpoint.get("status") == "completed":
+            yield [], "**✅ Info:** Generation already completed. Start a new generation or load existing keyframes.", "Already complete", checkpoint, "Complete"
+            return
 
-    def _format_progress(self, checkpoint: Dict, total_shots: int) -> str:
-        """Format progress details as markdown"""
-        completed = len(checkpoint.get("completed_shots", []))
-        total_images = checkpoint.get("total_images_generated", 0)
-        current_shot = checkpoint.get("current_shot", "None")
-        status = checkpoint.get("status", "unknown")
+        if self.current_storyboard is None:
+            _, load_status = self.load_storyboard(storyboard_file)
+            if "Error" in load_status:
+                yield [], load_status, "No progress", {}, "No shot"
+                return
 
-        progress_md = f"""
-### Progress
+        checkpoint["status"] = "running"
+        checkpoint["resumed_at"] = datetime.now().isoformat()
 
-- **Status:** {status}
-- **Completed Shots:** {completed}/{total_shots}
-- **Total Images Generated:** {total_images}
-- **Current Shot:** {current_shot}
-- **Started:** {checkpoint.get('started_at', 'N/A')}
-"""
+        # Get ComfyUI URL from settings
+        comfy_url = self.config.get_comfy_url()
 
-        if status == "completed":
-            progress_md += f"- **Completed:** {checkpoint.get('completed_at', 'N/A')}\n"
+        yield from self.generation_service.run_generation(
+            storyboard=self.current_storyboard,
+            workflow_file=workflow_file,
+            checkpoint=checkpoint,
+            project=project,
+            comfy_url=comfy_url,
+            progress_callback=progress
+        )
 
-        return progress_md
-
-    def _save_checkpoint(self, checkpoint: Dict, storyboard_file: str, project: Dict[str, Any]):
-        """Save checkpoint to file"""
-        try:
-            checkpoint_dir = self.project_manager.ensure_dir(project, "checkpoints")
-
-            # Create checkpoint filename based on storyboard
-            base_name = os.path.splitext(os.path.basename(storyboard_file))[0]
-            checkpoint_name = f"{base_name}_checkpoint.json"
-            checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
-
-            with open(checkpoint_path, 'w') as f:
-                json.dump(checkpoint, f, indent=2)
-
-            self.checkpoint_file = checkpoint_path
-            print(f"💾 Checkpoint saved: {checkpoint_path}")
-
-        except Exception as e:
-            print(f"✗ Failed to save checkpoint: {e}")
-
-    def _load_checkpoint(self, storyboard_file: str, project: Dict[str, Any]) -> Optional[Dict]:
-        """Load checkpoint from file"""
-        try:
-            checkpoint_dir = self.project_manager.ensure_dir(project, "checkpoints")
-
-            base_name = os.path.splitext(os.path.basename(storyboard_file))[0]
-            checkpoint_name = f"{base_name}_checkpoint.json"
-            checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
-
-            if not os.path.exists(checkpoint_path):
-                return None
-
-            with open(checkpoint_path, 'r') as f:
-                checkpoint = json.load(f)
-
-            print(f"📂 Checkpoint loaded: {checkpoint_path}")
-            return checkpoint
-
-        except Exception as e:
-            print(f"✗ Failed to load checkpoint: {e}")
-            return None
-
-    def _checkpoint_exists(self) -> bool:
-        """Soft check if a checkpoint file exists for current storyboard."""
-        try:
-            storyboard_file = self.config.get_current_storyboard()
-            if not storyboard_file:
-                return False
-            project = self.project_manager.get_active_project(refresh=True)
-            if not project:
-                return False
-            checkpoint_dir = self.project_manager.ensure_dir(project, "checkpoints")
-            base_name = os.path.splitext(os.path.basename(storyboard_file))[0]
-            checkpoint_name = f"{base_name}_checkpoint.json"
-            checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
-            return os.path.exists(checkpoint_path)
-        except Exception:
-            return False
+    def stop_generation(self) -> Tuple[str, str]:
+        return self.generation_service.stop_generation()
 
     def _reset_controls(self):
-        """Reset UI controls to idle state on load."""
-        self.stop_requested = False
-        self.is_running = False
+        self.generation_service.stop_requested = False
+        self.generation_service.is_running = False
         status = "**Status:** Bereit. Start kann erneut gedrückt werden."
         progress_md = "No generation in progress"
         return (
-            gr.update(interactive=True),  # start_btn
-            gr.update(interactive=False),  # stop_btn
-            gr.update(interactive=False),  # resume_btn (deaktiviert in V1)
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
             status,
             progress_md,
         )
 
-    # -----------------------------
-    # UI helpers
-    # -----------------------------
     def _status_bar(self) -> str:
-        """Compact status line similar to project tab."""
         project = self.project_manager.get_active_project(refresh=True)
         storyboard = self.config.get_current_storyboard()
         width, height = self.config.get_resolution_tuple()
@@ -746,104 +379,15 @@ class KeyframeGeneratorAddon(BaseAddon):
             return abs_path.split(marker, 1)[-1]
         return os.path.basename(abs_path)
 
-    def _load_storyboard_with_status(self):
-        storyboard_json, status = self.load_storyboard_from_config()
-        return storyboard_json, status, self._status_bar()
-
-    def _copy_images_from_comfyui(self, filename_prefix: str, gui_output_dir: str) -> List[str]:
-        """
-        Copy generated images from ComfyUI output to the active project keyframe directory
-
-        Args:
-            filename_prefix: Prefix used when generating (e.g., "hand-book_v1")
-            gui_output_dir: Destination directory path
-
-        Returns:
-            List of copied image paths
-        """
-        import glob
-        import shutil
-
-        copied_images = []
-
-        try:
-            comfyui_output = self.project_manager.comfy_output_dir()
-        except FileNotFoundError as exc:
-            print(f"    ✗ Copy error: {exc}")
-            return []
-
-        try:
-            # ComfyUI default output directory
-            # Find images matching the prefix
-            pattern = os.path.join(comfyui_output, f"{filename_prefix}*.png")
-            matching_files = glob.glob(pattern)
-
-            print(f"    Looking for: {pattern}")
-            print(f"    Found {len(matching_files)} file(s)")
-
-            for source_path in matching_files:
-                filename = os.path.basename(source_path)
-                dest_path = os.path.join(gui_output_dir, filename)
-
-                # Copy file
-                shutil.copy2(source_path, dest_path)
-                copied_images.append(dest_path)
-                print(f"    ✓ Copied: {filename}")
-
-            return copied_images
-
-        except Exception as e:
-            print(f"    ✗ Copy error: {e}")
-            return []
-
-    def _copy_images_list(self, source_paths: List[str], dest_dir: str) -> List[str]:
-        """Copy already-downloaded images into project keyframe directory."""
-        import shutil
-
-        copied = []
-        for source_path in source_paths:
-            try:
-                if not os.path.exists(source_path):
-                    continue
-                filename = os.path.basename(source_path)
-                dest_path = os.path.join(dest_dir, filename)
-                if os.path.exists(dest_path):
-                    copied.append(dest_path)
-                    continue
-                shutil.copy2(source_path, dest_path)
-                copied.append(dest_path)
-            except Exception as exc:
-                print(f"    ✗ Copy error (api download): {exc}")
-        return copied
-
-    @staticmethod
-    def _dedup_paths(paths: List[str]) -> List[str]:
-        """Remove duplicate paths while preserving order."""
-        seen = set()
-        unique: List[str] = []
-        for p in paths:
-            if p in seen:
-                continue
-            seen.add(p)
-            unique.append(p)
-        return unique
-
+    @handle_errors("Konnte Ausgabeordner nicht öffnen")
     def open_output_folder(self) -> str:
-        """Open output folder in file manager"""
-        try:
-            project = self.project_manager.get_active_project(refresh=True)
-            if not project:
-                return "**❌ Error:** Kein aktives Projekt. Bitte im Tab 'Projekt' auswählen."
-            output_dir = self.project_manager.ensure_dir(project, "keyframes")
-            os.makedirs(output_dir, exist_ok=True)
-
-            # Open folder (Linux)
-            os.system(f'xdg-open "{output_dir}"')
-
-            return f"**📁 Opened:** `{output_dir}`"
-
-        except Exception as e:
-            return f"**❌ Error:** {str(e)}"
+        project = self.project_manager.get_active_project(refresh=True)
+        if not project:
+            return "**❌ Error:** Kein aktives Projekt. Bitte im Tab 'Projekt' auswählen."
+        output_dir = self.project_manager.ensure_dir(project, "keyframes")
+        os.makedirs(output_dir, exist_ok=True)
+        os.system(f'xdg-open "{output_dir}"')
+        return f"**📁 Opened:** `{output_dir}`"
 
     def _project_status_md(self) -> str:
         project = self.project_manager.get_active_project(refresh=True)
@@ -854,66 +398,41 @@ class KeyframeGeneratorAddon(BaseAddon):
             f"- Pfad: `{project.get('path')}`"
         )
 
-    def _current_storyboard_md(self) -> str:
+    def _get_storyboard_info(self) -> str:
+        """Get storyboard info for display (consistent with other tabs)."""
         self.config.refresh()
-        storyboard = self.config.get_current_storyboard()
-        if not storyboard:
-            return "**❌ Kein Storyboard gesetzt:** Bitte im Tab `📁 Projekt` auswählen."
-        return f"**Storyboard:** `{storyboard}` (aus Tab 📁 Projektverwaltung)"
+        project = self.project_manager.get_active_project(refresh=True)
+        if not project:
+            return "**Storyboard:** ❌ No active project - create one in Tab 📁 Projekt"
 
-    # Removed: _apply_global_resolution() - now using StoryboardService.apply_resolution_from_config()
-
-    def _get_available_storyboards(self) -> List[str]:
-        """Get list of available storyboard files"""
-        directories = self._storyboard_search_dirs()
-        storyboards: List[str] = []
-        seen = set()
-
-        for directory in directories:
-            for filename in sorted(os.listdir(directory)):
-                if not filename.endswith('.json'):
-                    continue
-                if 'storyboard' not in filename.lower():
-                    continue
-                full_path = os.path.join(directory, filename)
-                if full_path in seen:
-                    continue
-                storyboards.append(full_path)
-                seen.add(full_path)
-
-        return storyboards if storyboards else ["No storyboards found - add JSON files to config/ or project folder"]
-
-    def _get_default_storyboard(self) -> Optional[str]:
-        """Get default storyboard (first available)"""
-        storyboards = self._get_available_storyboards()
-        return storyboards[0] if storyboards else None
+        storyboard_path = self.config.get_current_storyboard()
+        if storyboard_path:
+            return f"**Storyboard:** {storyboard_path}\n\n*(aus Tab 📁 Projektverwaltung)*"
+        else:
+            return "**Storyboard:** ❌ No storyboard selected - select one in Tab 📁 Projekt"
 
     def _get_available_workflows(self) -> List[str]:
-        """Get list of available workflow files"""
         workflows = self.workflow_registry.get_files(category="flux")
         return workflows if workflows else ["No workflows found - update workflow_presets.json"]
 
     def _get_default_workflow(self) -> Optional[str]:
-        """Get default workflow"""
         return self.workflow_registry.get_default(category="flux")
 
-    def _storyboard_search_dirs(self) -> List[str]:
-        """Return directories that may contain storyboard files."""
-        dirs: List[str] = []
-        config_dir = self.config.config_dir
-        if config_dir and os.path.isdir(config_dir):
-            dirs.append(config_dir)
+    def _save_checkpoint(self, checkpoint: Dict[str, Any], storyboard_file: str, project: Dict[str, Any]):
+        try:
+            self.generation_service._save_checkpoint(checkpoint, storyboard_file, project)  # pylint: disable=protected-access
+        except Exception as exc:  # pragma: no cover
+            logger.error(f"Failed to save checkpoint: {exc}", exc_info=True)
 
-        project = self.project_manager.get_active_project(refresh=True)
-        if project:
-            project_root = project.get("path")
-            for candidate in (project_root, os.path.join(project_root, "storyboards")):
-                if candidate and os.path.isdir(candidate):
-                    dirs.append(candidate)
-
-        # remove duplicates while preserving order
-        unique_dirs: List[str] = []
-        for directory in dirs:
-            if directory not in unique_dirs:
-                unique_dirs.append(directory)
-        return unique_dirs
+    def _load_checkpoint(self, storyboard_file: str, project: Dict[str, Any]) -> Optional[Dict]:
+        try:
+            checkpoint_dir = self.project_manager.ensure_dir(project, "checkpoints")
+            base_name = os.path.splitext(os.path.basename(storyboard_file))[0]
+            checkpoint_path = os.path.join(checkpoint_dir, f"{base_name}_checkpoint.json")
+            if not os.path.exists(checkpoint_path):
+                return None
+            with open(checkpoint_path, "r") as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.error(f"Failed to load checkpoint: {exc}", exc_info=True)
+            return None

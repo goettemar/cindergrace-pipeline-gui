@@ -173,3 +173,15 @@ class ConfigManager:
     def get_log_level(self) -> str:
         """Get logging level"""
         return self.get("log_level", "INFO")
+
+    def get_video_initial_wait(self) -> int:
+        """Get initial wait time in seconds before checking for video files (default: 60)"""
+        return int(self.get("video_initial_wait", 60))
+
+    def get_video_retry_delay(self) -> int:
+        """Get delay between retry checks in seconds (default: 30)"""
+        return int(self.get("video_retry_delay", 30))
+
+    def get_video_max_retries(self) -> int:
+        """Get maximum number of retries for video file detection (default: 20)"""
+        return int(self.get("video_max_retries", 20))

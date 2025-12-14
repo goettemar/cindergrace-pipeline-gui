@@ -245,6 +245,7 @@ class ComfyUIAPI:
             start_time = time.time()
             current_node = None
             max_nodes = 1
+            has_started = False  # Track if execution has actually started (seen at least one node)
 
             while True:
                 # Check timeout
@@ -265,30 +266,68 @@ class ComfyUIAPI:
 
                         # Execution started
                         if msg_type == "execution_start":
+                            logger.debug(f"Received execution_start for prompt")
                             if callback:
                                 callback(0.0, "Execution started...")
 
                         # Progress update
                         elif msg_type == "executing":
-                            node_id = data.get("data", {}).get("node")
-                            if node_id:
+                            exec_data = data.get("data", {})
+                            node_id = exec_data.get("node")
+                            exec_prompt_id = exec_data.get("prompt_id")
+
+                            # When node is None and prompt_id matches:
+                            # - At START: node=null means "about to execute" (has_started=False)
+                            # - At END: node=null means "execution complete" (has_started=True)
+                            if node_id is None and exec_prompt_id == prompt_id:
+                                if has_started:
+                                    # This is the END signal - execution complete
+                                    logger.info(f"Execution complete for prompt {prompt_id}")
+                                    if callback:
+                                        callback(1.0, "Generation complete")
+                                    break
+                                else:
+                                    # This is the START signal - execution beginning
+                                    logger.debug(f"Execution starting for prompt {prompt_id}")
+                                    if callback:
+                                        callback(0.0, "Execution starting...")
+                            elif node_id:
+                                has_started = True  # We've seen at least one node execute
                                 current_node = node_id
                                 if callback:
                                     # Estimate progress (rough approximation)
                                     progress = 0.5  # Mid-execution
                                     callback(progress, f"Executing node {node_id}...")
 
-                        # Execution complete
+                        # Node execution complete
                         elif msg_type == "executed":
+                            has_started = True  # Execution has definitely started
                             node_id = data.get("data", {}).get("node")
                             if callback:
                                 callback(0.9, f"Completed node {node_id}")
 
-                        # Check if our job is done
-                        elif msg_type == "execution_cached" or msg_type == "execution_success":
-                            if callback:
-                                callback(1.0, "Generation complete")
-                            break
+                        # execution_cached means some nodes are cached, but job may still be running
+                        # Do NOT break on this - just note that execution has started
+                        elif msg_type == "execution_cached":
+                            cached_data = data.get("data", {})
+                            cached_prompt_id = cached_data.get("prompt_id")
+                            if cached_prompt_id == prompt_id:
+                                has_started = True  # Execution has begun (some nodes cached)
+                                logger.debug(f"Some nodes cached for prompt {prompt_id}, continuing to wait...")
+                                if callback:
+                                    callback(0.1, "Some nodes cached, processing...")
+
+                        # execution_success is a clear completion signal
+                        elif msg_type == "execution_success":
+                            success_data = data.get("data", {})
+                            success_prompt_id = success_data.get("prompt_id")
+                            if success_prompt_id == prompt_id:
+                                logger.info(f"Received execution_success for prompt {prompt_id}")
+                                if callback:
+                                    callback(1.0, "Generation complete")
+                                break
+                            else:
+                                logger.debug(f"Ignoring execution_success for different prompt {success_prompt_id}")
 
                 except websocket.WebSocketTimeoutException:
                     # Check if job is done via history

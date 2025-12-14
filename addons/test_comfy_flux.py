@@ -1,4 +1,4 @@
-"""Test addon for ComfyUI connection and Flux image generation"""
+"""Test addon for ComfyUI connection and keyframe image generation"""
 import os
 import sys
 import time
@@ -16,12 +16,13 @@ from infrastructure.workflow_registry import WorkflowRegistry
 
 
 class TestComfyFluxAddon(BaseAddon):
-    """Test ComfyUI connection and generate test images with Flux"""
+    """Test ComfyUI connection and generate keyframe test images"""
 
     def __init__(self):
         super().__init__(
             name="ComfyUI Test",
-            description="Test ComfyUI connection and generate Flux images"
+            description="Test ComfyUI connection and generate keyframe test images",
+            category="tools"
         )
         self.config = ConfigManager()
         self.api = None
@@ -35,13 +36,14 @@ class TestComfyFluxAddon(BaseAddon):
         """Render the test addon UI"""
 
         with gr.Blocks() as interface:
-            gr.Markdown("# 🔌 ComfyUI Connection & Flux Test")
-            gr.Markdown("Test your local ComfyUI installation and generate test images with Flux")
+            gr.Markdown("# 🔌 ComfyUI Connection & Keyframe Test")
+            gr.Markdown("Test your local ComfyUI installation and generate keyframe test images")
+
+            # Progress Section (always visible)
+            status_text = gr.Markdown("**Ready** - Click 'Generate Test Images' to start")
 
             # Connection Section
-            with gr.Group():
-                gr.Markdown("## Connection Test")
-
+            with gr.Accordion("🔌 Connection Test", open=False):
                 with gr.Row():
                     comfy_url = gr.Textbox(
                         value=self.config.get_comfy_url(),
@@ -55,12 +57,8 @@ class TestComfyFluxAddon(BaseAddon):
                 with gr.Accordion("System Info", open=False):
                     system_info = gr.JSON(label="ComfyUI System Stats", value={})
 
-            gr.Markdown("---")
-
-            # Generation Section
-            with gr.Group():
-                gr.Markdown("## 🎨 Flux Test Generation")
-
+            # Generation & Results Section (combined)
+            with gr.Accordion("🎨 Keyframe Test Generation & Results", open=False):
                 prompt = gr.Textbox(
                     value="gothic cathedral interior at night, moonlight through tall windows, scattered candles on marble floor, dust in air, cinematic, dark atmosphere, 16:9",
                     label="Prompt",
@@ -81,14 +79,16 @@ class TestComfyFluxAddon(BaseAddon):
                         value=1001,
                         label="Starting Seed",
                         precision=0,
-                        info="Seed will increment for each image"
+                        minimum=0,
+                        maximum=2147483647,
+                        info="Seed will increment for each image (0-2147483647)"
                     )
 
                 workflow_dropdown = gr.Dropdown(
                     choices=self._get_available_workflows(),
                     value=self._get_default_workflow(),
                     label="Workflow Template",
-                    info="Select one of your Flux workflow files"
+                    info="Select one of your image generation workflow files"
                 )
 
                 refresh_workflows_btn = gr.Button("🔄 Refresh Workflows", size="sm")
@@ -99,15 +99,8 @@ class TestComfyFluxAddon(BaseAddon):
                     size="lg"
                 )
 
-            # Progress Section
-            with gr.Group():
-                status_text = gr.Markdown("**Ready** - Click 'Generate Test Images' to start")
-
-            gr.Markdown("---")
-
-            # Results Section
-            with gr.Group():
-                gr.Markdown("## 🖼️ Generated Images")
+                gr.Markdown("---")
+                gr.Markdown("### 🖼️ Generated Images")
 
                 image_gallery = gr.Gallery(
                     label="Results",
@@ -186,7 +179,7 @@ class TestComfyFluxAddon(BaseAddon):
         workflow_file: str
     ) -> Tuple[List[str], str]:
         """
-        Generate test images using Flux
+        Generate keyframe test images using image generation workflow
 
         Args:
             comfy_url: ComfyUI server URL

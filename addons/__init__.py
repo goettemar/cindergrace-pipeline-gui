@@ -6,11 +6,13 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.base_addon import BaseAddon
+from addons.storyboard_editor import StoryboardEditorAddon
 from addons.project_panel import ProjectAddon
 from addons.keyframe_generator import KeyframeGeneratorAddon
 from addons.keyframe_selector import KeyframeSelectorAddon
 from addons.video_generator import VideoGeneratorAddon
 from addons.test_comfy_flux import TestComfyFluxAddon
+from addons.model_manager import ModelManagerAddon
 from addons.settings_panel import SettingsAddon
 from infrastructure.logger import get_logger
 
@@ -19,16 +21,17 @@ logger = get_logger(__name__)
 
 # Registry of all available addons
 AVAILABLE_ADDONS = [
-    ProjectAddon,
-    KeyframeGeneratorAddon,  # ✅ Phase 1 - Keyframe generation
-    KeyframeSelectorAddon,   # ✅ Phase 2 - Keyframe selection
-    VideoGeneratorAddon,     # ✅ Phase 3 - Wan video generation (3s segments)
-    TestComfyFluxAddon,
-    SettingsAddon,
+    ProjectAddon,            # Tab 1
+    StoryboardEditorAddon,   # Tab 2 - Storyboard editor
+    KeyframeGeneratorAddon,  # Tab 3 - Phase 1
+    KeyframeSelectorAddon,   # Tab 4 - Phase 2
+    VideoGeneratorAddon,     # Tab 5 - Phase 3
+    TestComfyFluxAddon,      # Tools Tab
+    ModelManagerAddon,       # Tools Tab
+    SettingsAddon,           # Tab 7
     # Future addons will be added here:
-    # VideoGeneratorAddon,    # Phase 3 - Video generation
-    # LipsyncProcessorAddon,  # Phase 4 - Lipsync processing
-    # TimelineAssemblerAddon, # Phase 5 - Timeline assembly
+    # LipsyncProcessorAddon,
+    # TimelineAssemblerAddon,
 ]
 
 

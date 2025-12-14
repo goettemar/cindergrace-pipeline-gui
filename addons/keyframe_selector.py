@@ -13,6 +13,7 @@ from addons.base_addon import BaseAddon
 from infrastructure.config_manager import ConfigManager
 from infrastructure.project_store import ProjectStore
 from infrastructure.logger import get_logger
+from infrastructure.error_handler import handle_errors
 from domain.storyboard_service import StoryboardService
 from services.selection_service import SelectionService
 
@@ -34,11 +35,56 @@ class KeyframeSelectorAddon(BaseAddon):
     def get_tab_name(self) -> str:
         return "✅ Keyframe Selector"
 
+    def _auto_load_storyboard(self) -> Dict[str, Any]:
+        """Auto-load storyboard during render() - returns initial UI data."""
+        defaults = {
+            "storyboard_json": "{}",
+            "status": "**Status:** Storyboard noch nicht geladen",
+            "shot_ids": [],
+            "storyboard_state": {},
+            "summary": "Noch keine Keyframes ausgewählt.",
+            "preview": {},
+            "selections_state": {},
+            "variants_state": {},
+        }
+
+        try:
+            self.config.refresh()
+            storyboard_file = self.config.get_current_storyboard()
+            if not storyboard_file:
+                logger.debug("Keyframe Selector: No storyboard configured for auto-load")
+                return defaults
+
+            storyboard, error = self._load_storyboard_model(storyboard_file)
+            if error or not storyboard:
+                logger.warning(f"Keyframe Selector: Could not auto-load storyboard: {error}")
+                return defaults
+
+            shots = storyboard.shots
+            shot_ids = [shot.shot_id or f"{idx+1:03d}" for idx, shot in enumerate(shots)]
+            project_name = storyboard.project or "Unbekanntes Projekt"
+
+            defaults["storyboard_json"] = json.dumps(storyboard.raw, indent=2)
+            defaults["status"] = f"**✅ Storyboard geladen:** {project_name} – {len(shots)} Shots"
+            defaults["shot_ids"] = shot_ids
+            defaults["storyboard_state"] = storyboard.raw
+            defaults["summary"] = self._format_selection_summary({}, storyboard.raw)
+            defaults["preview"] = self._build_preview_payload(storyboard.raw, {})
+
+            logger.info(f"Keyframe Selector: Auto-loaded storyboard '{storyboard_file}' with {len(shots)} shots")
+        except Exception as e:
+            logger.error(f"Keyframe Selector: Error in auto-load: {e}", exc_info=True)
+
+        return defaults
+
     def render(self) -> gr.Blocks:
         """Render selector UI"""
-        storyboard_state = gr.State({})
-        variants_state = gr.State({})
-        selections_state = gr.State({})
+        # Auto-load storyboard during render (not via interface.load)
+        auto_loaded = self._auto_load_storyboard()
+
+        storyboard_state = gr.State(auto_loaded["storyboard_state"])
+        variants_state = gr.State(auto_loaded["variants_state"])
+        selections_state = gr.State(auto_loaded["selections_state"])
 
         with gr.Blocks() as interface:
             gr.Markdown("# ✅ Keyframe Selector - Phase 2")
@@ -52,58 +98,61 @@ class KeyframeSelectorAddon(BaseAddon):
                 project_status = gr.Markdown(self._project_status_md())
                 refresh_project_btn = gr.Button("🔄 Projektstatus aktualisieren", size="sm")
 
-            with gr.Group():
-                gr.Markdown("## 📁 Storyboard & Keyframes")
-
+            with gr.Accordion("📁 Storyboard", open=False):
                 storyboard_info_md = gr.Markdown(self._current_storyboard_md())
                 load_storyboard_btn = gr.Button("📖 Storyboard laden (aus Projekt-Tab)", variant="secondary")
 
                 storyboard_info = gr.Code(
                     label="Storyboard-Details",
                     language="json",
-                    value="{}",
+                    value=auto_loaded["storyboard_json"],
                     lines=14,
                     max_lines=20,
                     interactive=False,
                 )
 
-                status_text = gr.Markdown("**Status:** Storyboard noch nicht geladen")
+            status_text = gr.Markdown(auto_loaded["status"])
 
-                with gr.Row():
+            # Main content: Left sidebar (20%) + Right content (80%)
+            with gr.Row():
+                # Left sidebar - Shot selection and actions
+                with gr.Column(scale=1, min_width=200):
+                    gr.Markdown("### 🎬 Shot-Auswahl")
+                    refresh_shot_btn = gr.Button("🗂️ Keyframes aktualisieren", variant="secondary", size="sm")
                     shot_dropdown = gr.Dropdown(
-                        choices=[],
+                        choices=auto_loaded["shot_ids"],
+                        value=auto_loaded["shot_ids"][0] if auto_loaded["shot_ids"] else None,
                         label="Shot auswählen",
-                        info="Nach dem Laden des Storyboards wählbar",
+                        info="Wähle einen Shot",
                         interactive=True,
                     )
-                    refresh_shot_btn = gr.Button("🗂️ Keyframes aktualisieren", variant="secondary")
+                    gr.Markdown("---")
+                    save_selection_btn = gr.Button("💾 Auswahl speichern", variant="primary")
+                    clear_selection_btn = gr.Button("🧹 Auswahl entfernen", variant="secondary")
 
-            with gr.Group():
-                gr.Markdown("## 🖼️ Shot-Überblick")
-                shot_info = gr.Markdown("Kein Shot ausgewählt.")
+                # Right content - Shot overview and variants
+                with gr.Column(scale=4):
+                    gr.Markdown("### 🖼️ Shot-Überblick")
+                    shot_info = gr.Markdown("Kein Shot ausgewählt.")
 
-                keyframe_gallery = gr.Gallery(
-                    label="Varianten",
-                    show_label=True,
-                    columns=4,
-                    height="auto",
-                    object_fit="contain",
-                )
+                    keyframe_gallery = gr.Gallery(
+                        label="Varianten",
+                        show_label=True,
+                        columns=4,
+                        height="auto",
+                        object_fit="contain",
+                    )
 
-                variant_radio = gr.Radio(
-                    choices=[],
-                    label="Beste Variante auswählen",
-                    info="Wird mit Dateinamen + Variantennummer gefüllt",
-                )
-
-                with gr.Row():
-                    save_selection_btn = gr.Button("💾 Auswahl für Shot speichern", variant="primary")
-                    clear_selection_btn = gr.Button("🧹 Auswahl für Shot entfernen", variant="secondary")
+                    variant_radio = gr.Radio(
+                        choices=[],
+                        label="Beste Variante auswählen",
+                        info="Wähle die beste Variante für diesen Shot",
+                    )
 
             with gr.Group():
                 gr.Markdown("## 📊 Auswahlübersicht & Export")
-                selection_summary = gr.Markdown("Noch keine Keyframes ausgewählt.")
-                selection_json = gr.JSON(label="Export-Vorschau", value={})
+                selection_summary = gr.Markdown(auto_loaded["summary"])
+                selection_json = gr.JSON(label="Export-Vorschau", value=auto_loaded["preview"])
 
                 export_btn = gr.Button("📤 Auswahl exportieren", variant="primary")
 
@@ -157,71 +206,25 @@ class KeyframeSelectorAddon(BaseAddon):
                 outputs=[project_status],
             )
 
+            # Note: Auto-load is now done synchronously during render() via _auto_load_storyboard()
+            # The interface.load() event only fires on full page load, not on tab switch
+
         return interface
 
-    def load_storyboard(
-        self, storyboard_file: str
-    ) -> Tuple[str, str, Any, Dict[str, Any], str, Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
-        """Load storyboard JSON and reset selections.
+    @handle_errors("Storyboard laden fehlgeschlagen", return_tuple=True)
+    def _load_storyboard_model(self, storyboard_file: str):
+        storyboard = StoryboardService.load_from_config(self.config, filename=storyboard_file)
+        StoryboardService.apply_resolution_from_config(storyboard, self.config)
+        storyboard.raw["storyboard_file"] = storyboard_file
+        return storyboard
 
-        Refactored to use centralized StoryboardService.
-        """
-        try:
-            if not storyboard_file or storyboard_file.startswith("No storyboard"):
-                empty_summary = self._format_selection_summary({}, {})
-                empty_preview = self._build_preview_payload({}, {})
-                return (
-                    "{}",
-                    "**❌ Fehler:** Keine Storyboard-Datei ausgewählt",
-                    gr.update(choices=[]),
-                    {},
-                    empty_summary,
-                    empty_preview,
-                    {},
-                    {},
-                )
-
-            # Use centralized service for loading
-            storyboard = StoryboardService.load_from_config(
-                self.config,
-                filename=storyboard_file
-            )
-
-            # Apply global resolution override
-            StoryboardService.apply_resolution_from_config(storyboard, self.config)
-
-            # Store metadata
-            storyboard.raw["storyboard_file"] = storyboard_file
-
-            # Prepare UI updates
-            shots = storyboard.shots
-            shot_ids = [shot.shot_id or f"{idx+1:03d}" for idx, shot in enumerate(shots)]
-            dropdown_update = gr.update(choices=shot_ids, value=shot_ids[0] if shot_ids else None)
-
-            project_name = storyboard.project or "Unbekanntes Projekt"
-            status = f"**✅ Storyboard geladen:** {project_name} – {len(shots)} Shots"
-
-            storyboard_json = json.dumps(storyboard.raw, indent=2)
-            summary = self._format_selection_summary({}, storyboard.raw)
-            preview = self._build_preview_payload(storyboard.raw, {})
-
-            return (
-                storyboard_json,
-                status,
-                dropdown_update,
-                storyboard.raw,
-                summary,
-                preview,
-                {},
-                {},
-            )
-        except Exception as exc:
-            logger.error(f"Failed to load storyboard: {exc}", exc_info=True)
+    def load_storyboard(self, storyboard_file: str) -> Tuple[str, str, Any, Dict[str, Any], str, Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+        if not storyboard_file or storyboard_file.startswith("No storyboard"):
             empty_summary = self._format_selection_summary({}, {})
             empty_preview = self._build_preview_payload({}, {})
             return (
                 "{}",
-                f"**❌ Fehler:** {exc}",
+                "**❌ Fehler:** Keine Storyboard-Datei ausgewählt",
                 gr.update(choices=[]),
                 {},
                 empty_summary,
@@ -229,6 +232,41 @@ class KeyframeSelectorAddon(BaseAddon):
                 {},
                 {},
             )
+
+        storyboard, error = self._load_storyboard_model(storyboard_file)
+        if error:
+            empty_summary = self._format_selection_summary({}, {})
+            empty_preview = self._build_preview_payload({}, {})
+            return (
+                "{}",
+                error,
+                gr.update(choices=[]),
+                {},
+                empty_summary,
+                empty_preview,
+                {},
+                {},
+            )
+
+        shots = storyboard.shots
+        shot_ids = [shot.shot_id or f"{idx+1:03d}" for idx, shot in enumerate(shots)]
+        dropdown_update = gr.update(choices=shot_ids, value=shot_ids[0] if shot_ids else None)
+        project_name = storyboard.project or "Unbekanntes Projekt"
+        status = f"**✅ Storyboard geladen:** {project_name} – {len(shots)} Shots"
+        storyboard_json = json.dumps(storyboard.raw, indent=2)
+        summary = self._format_selection_summary({}, storyboard.raw)
+        preview = self._build_preview_payload(storyboard.raw, {})
+
+        return (
+            storyboard_json,
+            status,
+            dropdown_update,
+            storyboard.raw,
+            summary,
+            preview,
+            {},
+            {},
+        )
 
     def load_storyboard_from_config(
         self
@@ -329,9 +367,25 @@ class KeyframeSelectorAddon(BaseAddon):
         if not options:
             return f"**❌ Fehler:** Für `{shot_id}` sind keine Varianten geladen.", current_summary, current_preview, selections_state
 
+        # Check if user selected a variant
+        if not selected_option:
+            return (
+                "**⚠️ Hinweis:** Bitte zuerst eine Variante aus der Liste oben auswählen, "
+                "bevor du die Auswahl speicherst.",
+                current_summary,
+                current_preview,
+                selections_state,
+            )
+
         choice = options.get(selected_option)
         if not choice:
-            return "**❌ Fehler:** Bitte eine Variante auswählen.", current_summary, current_preview, selections_state
+            return (
+                "**⚠️ Hinweis:** Die gewählte Variante ist ungültig. "
+                "Bitte eine Variante aus der Liste 'Beste Variante auswählen' wählen.",
+                current_summary,
+                current_preview,
+                selections_state,
+            )
 
         shot = self._get_shot_by_id(storyboard_state, shot_id) or {}
 
@@ -505,13 +559,20 @@ class KeyframeSelectorAddon(BaseAddon):
         self, storyboard: Dict[str, Any], selections: Dict[str, Dict[str, Any]]
     ) -> Dict[str, Any]:
         project = storyboard.get("project", "Unbekanntes Projekt") if storyboard else "Unbekanntes Projekt"
+        shots = storyboard.get("shots", []) if storyboard else []
+        all_shot_ids = {s.get("shot_id") for s in shots}
+        selected_shot_ids = set(selections.keys()) if selections else set()
+        missing_shot_ids = sorted(all_shot_ids - selected_shot_ids)
+
         payload = {
             "project": project,
-            "total_shots": len(selections or {}),
+            "total_shots": len(shots),
+            "selected_shots": len(selected_shot_ids),
+            "missing_shots": missing_shot_ids,
             "selections": [],
         }
 
-        for shot_id in sorted(selections.keys()):
+        for shot_id in sorted(selections.keys()) if selections else []:
             entry = selections[shot_id]
             payload["selections"].append(
                 {

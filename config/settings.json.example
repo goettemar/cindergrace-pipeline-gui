@@ -1,0 +1,16 @@
+{
+  "comfy_url": "http://127.0.0.1:8188",
+  "comfy_root": "/path/to/your/ComfyUI",
+  "workflow_dir": "config/workflow_templates",
+  "output_dir": "output",
+  "log_level": "INFO",
+  "theme": "default",
+  "auto_save_results": true,
+  "max_concurrent_jobs": 1,
+  "current_project": "",
+  "current_storyboard": "",
+  "global_resolution": "540p_landscape",
+  "video_initial_wait": 60,
+  "video_retry_delay": 30,
+  "video_max_retries": 20
+}

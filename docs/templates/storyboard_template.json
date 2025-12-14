@@ -1,0 +1,113 @@
+{
+  "project": "Your Project Name",
+  "version": "2.0",
+  "description": "Template storyboard with complete field structure for CINDERGRACE pipeline",
+  "total_shots": 5,
+  "shots": [
+    {
+      "shot_id": "001",
+      "filename_base": "opening-scene",
+      "description": "Wide establishing shot of the main location",
+      "scene": "Opening",
+      "character": "None",
+      "prompt": "wide angle cinematic shot of a futuristic city skyline at sunset, golden hour lighting, dramatic clouds, flying vehicles in distance, neon signs beginning to glow, hyper-realistic, 8k quality, cinematic composition",
+      "negative_prompt": "blurry, low quality, distorted, deformed, bad anatomy, oversaturated",
+      "duration": 4.0,
+      "camera_movement": "slow_push",
+      "seed": -1,
+      "cfg_scale": 7.0,
+      "steps": 20,
+      "wan_motion": {
+        "type": "macro_dolly",
+        "strength": 0.5,
+        "notes": "Slow forward dolly movement revealing the city"
+      }
+    },
+    {
+      "shot_id": "002",
+      "filename_base": "character-intro",
+      "description": "Medium shot introducing the protagonist",
+      "scene": "Character Introduction",
+      "character": "Protagonist",
+      "prompt": "medium shot of a young woman in futuristic clothing standing on a rooftop, confident pose, wind blowing hair, city lights behind her, dramatic rim lighting, cinematic portrait, cyberpunk aesthetic, neon reflections",
+      "negative_prompt": "blurry, bad face, deformed hands, low quality, cartoon",
+      "duration": 3.5,
+      "camera_movement": "static",
+      "seed": -1,
+      "cfg_scale": 7.5,
+      "steps": 25,
+      "wan_motion": {
+        "type": "none",
+        "strength": 0.3,
+        "notes": "Minimal atmospheric movement, focus on character"
+      }
+    },
+    {
+      "shot_id": "003",
+      "filename_base": "device-closeup",
+      "description": "Close-up of protagonist activating a holographic device",
+      "scene": "Technology Interaction",
+      "character": "Protagonist",
+      "prompt": "extreme close-up of hands holding and activating a holographic device, blue glowing interface projecting upward, futuristic UI elements, shallow depth of field, cinematic macro shot, sci-fi technology",
+      "negative_prompt": "blurry, deformed hands, bad anatomy, low resolution",
+      "duration": 2.5,
+      "camera_movement": "dolly",
+      "seed": -1,
+      "cfg_scale": 7.0,
+      "steps": 20,
+      "wan_motion": {
+        "type": "macro_dolly",
+        "strength": 0.6,
+        "notes": "Slow push-in on the device with slight handheld feel"
+      }
+    },
+    {
+      "shot_id": "004",
+      "filename_base": "reaction-shot",
+      "description": "Protagonist's reaction to information on the device",
+      "scene": "Revelation",
+      "character": "Protagonist",
+      "prompt": "close-up of young woman's face illuminated by blue holographic light from below, surprised expression, wide eyes, detailed facial features, cinematic lighting, cyberpunk mood, neon reflections in eyes",
+      "negative_prompt": "blurry, bad face, asymmetrical eyes, low quality, deformed",
+      "duration": 3.0,
+      "camera_movement": "static",
+      "seed": -1,
+      "cfg_scale": 7.5,
+      "steps": 25,
+      "wan_motion": {
+        "type": "none",
+        "strength": 0.4,
+        "notes": "Very subtle movement to maintain focus on expression"
+      }
+    },
+    {
+      "shot_id": "005",
+      "filename_base": "action-sequence",
+      "description": "Protagonist leaps from rooftop with city in background",
+      "scene": "Action",
+      "character": "Protagonist",
+      "prompt": "dynamic action shot of woman in mid-jump from rooftop, flowing coat billowing, futuristic city skyline below, dramatic lighting, motion blur on edges, cinematic action composition, heroic pose, neon-lit cityscape",
+      "negative_prompt": "blurry face, static pose, low quality, bad anatomy, deformed limbs",
+      "duration": 3.0,
+      "camera_movement": "pan",
+      "seed": -1,
+      "cfg_scale": 7.0,
+      "steps": 20,
+      "wan_motion": {
+        "type": "macro_pan",
+        "strength": 0.7,
+        "notes": "Camera follows the jump with dynamic pan movement"
+      }
+    }
+  ],
+  "generation_settings": {
+    "variants_per_shot": 4,
+    "base_seed": 1000,
+    "steps": 20,
+    "cfg_scale": 7.0,
+    "workflow": "flux_test_simple.json",
+    "output_dir": "keyframes",
+    "notes": "Default settings for keyframe generation phase"
+  },
+  "notes": "This is a complete template storyboard showing all available fields. Use this as a reference when creating new storyboards via the Storyboard Editor or manually."
+}

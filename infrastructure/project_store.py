@@ -138,6 +138,38 @@ class ProjectStore:
         os.makedirs(path, exist_ok=True)
         return path
 
+    def set_project_storyboard(
+        self,
+        project: Dict[str, str],
+        storyboard_filename: str,
+        set_as_default: bool = True
+    ) -> Dict[str, str]:
+        """Register storyboard with project and persist project.json."""
+        project_file = os.path.join(project["path"], "project.json")
+
+        storyboards = project.get("storyboards") or []
+        if storyboard_filename not in storyboards:
+            storyboards.append(storyboard_filename)
+        project["storyboards"] = storyboards
+
+        if set_as_default:
+            project["default_storyboard"] = storyboard_filename
+
+        self._write_project_file({"path": project["path"], **project})
+        return project
+
+    def get_project_storyboard_dir(self, project: Dict[str, str]) -> str:
+        """Return storyboard directory path for project."""
+        if not project:
+            raise RuntimeError("Kein aktives Projekt gesetzt.")
+        return os.path.join(project["path"], "storyboards")
+
+    def ensure_storyboard_dir(self, project: Dict[str, str]) -> str:
+        """Ensure storyboard directory exists for project."""
+        storyboard_dir = self.get_project_storyboard_dir(project)
+        os.makedirs(storyboard_dir, exist_ok=True)
+        return storyboard_dir
+
     def project_path(self, project: Dict[str, str], *parts: str) -> str:
         if not project:
             raise RuntimeError("Kein aktives Projekt gesetzt.")

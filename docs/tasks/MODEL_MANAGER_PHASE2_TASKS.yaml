@@ -1,0 +1,516 @@
+# Model Manager Phase 2 - Implementation Tasks
+# Created: 2025-12-14
+# Status: Ready for Implementation
+#
+# Phase 2 Overview:
+# - Storage statistics and insights
+# - Duplicate detection (hash-based)
+# - Workflow reference mapping
+# - Enhanced batch operations
+# - Export reports (CSV, JSON, HTML)
+# - Advanced filtering
+#
+# Architecture Notes:
+# - Phase 1 services in: services/model_manager/
+# - UI addon in: addons/model_manager.py
+# - Follow existing patterns (logging, error handling)
+# - Services should be independent and testable
+
+---
+
+# =============================================================================
+# TASK 1: Duplicate Detection Service
+# =============================================================================
+task_id: phase2_duplicate_detector
+goal: Create a service to detect duplicate model files based on file hash (SHA256)
+scope:
+  include:
+    - services/model_manager/duplicate_detector.py (new)
+    - services/model_manager/__init__.py (update exports)
+  exclude:
+    - addons/model_manager.py (separate UI task)
+    - tests/ (separate test task)
+constraints:
+  - Use SHA256 for hash computation (standard, secure)
+  - Support partial hashing for large files (first 100MB + last 100MB + file size)
+  - Must work with existing ModelScanner data structures
+  - Preserve existing API contracts
+expected_changes:
+  files:
+    - services/model_manager/duplicate_detector.py
+    - services/model_manager/__init__.py
+  operations:
+    - create: duplicate_detector.py
+    - modify: __init__.py (add export)
+risk_level: low
+acceptance_criteria:
+  - DuplicateDetector class with find_duplicates() method
+  - Returns groups of duplicate files (same hash)
+  - Supports both full-hash and partial-hash modes
+  - Includes size comparison as preliminary filter
+  - Method to suggest which duplicate to keep (prefer Used status)
+  - Unit tests pass
+
+---
+
+# =============================================================================
+# TASK 2: Storage Statistics Service
+# =============================================================================
+task_id: phase2_storage_stats
+goal: Enhance ModelClassifier with detailed storage statistics and insights
+scope:
+  include:
+    - services/model_manager/storage_analyzer.py (new)
+    - services/model_manager/__init__.py (update exports)
+  exclude:
+    - addons/model_manager.py (separate UI task)
+constraints:
+  - Build on existing ModelScanner and ModelClassifier
+  - Lazy computation (don't scan unless requested)
+  - Cache results for performance
+expected_changes:
+  files:
+    - services/model_manager/storage_analyzer.py
+    - services/model_manager/__init__.py
+  operations:
+    - create: storage_analyzer.py
+    - modify: __init__.py
+risk_level: low
+acceptance_criteria:
+  - StorageAnalyzer class
+  - Methods:
+    - get_storage_overview() -> total size by status and type
+    - get_largest_models(n=10) -> top N largest models
+    - get_smallest_models(n=10) -> smallest models (potential cleanup)
+    - get_size_distribution() -> histogram data (size buckets)
+    - get_type_breakdown() -> detailed breakdown per model type
+  - Returns formatted sizes (GB, MB) and raw bytes
+  - Unit tests pass
+
+---
+
+# =============================================================================
+# TASK 3: Workflow Reference Mapping Service
+# =============================================================================
+task_id: phase2_workflow_mapper
+goal: Create service to show detailed model-to-workflow relationships
+scope:
+  include:
+    - services/model_manager/workflow_mapper.py (new)
+    - services/model_manager/__init__.py (update exports)
+  exclude:
+    - addons/model_manager.py
+constraints:
+  - Build on existing WorkflowScanner
+  - Bidirectional mapping (model->workflows, workflow->models)
+  - Include node context (which node uses the model)
+expected_changes:
+  files:
+    - services/model_manager/workflow_mapper.py
+    - services/model_manager/__init__.py
+  operations:
+    - create: workflow_mapper.py
+    - modify: __init__.py
+risk_level: low
+acceptance_criteria:
+  - WorkflowMapper class
+  - Methods:
+    - get_model_usage_details(filename) -> list of workflows + node info
+    - get_workflow_dependencies(workflow_name) -> all models used
+    - get_most_used_models(n=10) -> models in most workflows
+    - get_least_used_models() -> models in only 1 workflow
+    - get_workflow_complexity() -> model count per workflow
+  - Unit tests pass
+
+---
+
+# =============================================================================
+# TASK 4: Export Reports Service
+# =============================================================================
+task_id: phase2_report_exporter
+goal: Create service to export analysis results in multiple formats
+scope:
+  include:
+    - services/model_manager/report_exporter.py (new)
+    - services/model_manager/__init__.py (update exports)
+  exclude:
+    - addons/model_manager.py
+constraints:
+  - Support CSV, JSON, HTML formats
+  - HTML should be standalone (inline CSS)
+  - Include timestamp in exports
+  - Follow existing file writing patterns
+expected_changes:
+  files:
+    - services/model_manager/report_exporter.py
+    - services/model_manager/__init__.py
+  operations:
+    - create: report_exporter.py
+    - modify: __init__.py
+risk_level: low
+acceptance_criteria:
+  - ReportExporter class
+  - Methods:
+    - export_to_csv(data, filepath) -> model list as CSV
+    - export_to_json(data, filepath) -> full analysis as JSON
+    - export_to_html(data, filepath) -> formatted HTML report
+    - export_summary(stats, filepath) -> summary statistics
+  - All exports include:
+    - Timestamp
+    - Analysis parameters (paths, filters)
+    - Model counts and sizes
+  - Unit tests pass
+
+---
+
+# =============================================================================
+# TASK 5: Advanced Filtering Service
+# =============================================================================
+task_id: phase2_advanced_filter
+goal: Add advanced filtering capabilities to ModelClassifier
+scope:
+  include:
+    - services/model_manager/model_filter.py (new)
+    - services/model_manager/__init__.py (update exports)
+  exclude:
+    - addons/model_manager.py
+constraints:
+  - Composable filters (chain multiple conditions)
+  - Support size range, date, usage count filters
+  - Maintain backward compatibility with existing filter_models()
+expected_changes:
+  files:
+    - services/model_manager/model_filter.py
+    - services/model_manager/__init__.py
+  operations:
+    - create: model_filter.py
+    - modify: __init__.py
+risk_level: low
+acceptance_criteria:
+  - ModelFilter class
+  - Filter methods:
+    - by_size_range(min_bytes, max_bytes)
+    - by_modified_date(after=None, before=None)
+    - by_workflow_count(min_count, max_count)
+    - by_filename_pattern(regex)
+  - Chainable API: filter.by_status("unused").by_size_range(1GB, 10GB)
+  - Apply filters to classification results
+  - Unit tests pass
+
+---
+
+# =============================================================================
+# TASK 6: Batch Operations Enhancement
+# =============================================================================
+task_id: phase2_batch_operations
+goal: Enhance ArchiveManager with advanced batch operations
+scope:
+  include:
+    - services/model_manager/archive_manager.py (modify)
+  exclude:
+    - addons/model_manager.py
+constraints:
+  - Preserve existing methods
+  - Add new batch operations
+  - Include progress callback support
+  - Add undo/operation log capability
+expected_changes:
+  files:
+    - services/model_manager/archive_manager.py
+  operations:
+    - modify: archive_manager.py (extend class)
+risk_level: medium
+acceptance_criteria:
+  - New methods in ArchiveManager:
+    - archive_all_unused_by_type(model_type) -> move all unused of type
+    - restore_all_missing() -> restore all missing from archive
+    - delete_from_archive(models, confirm=True) -> permanent delete
+    - get_operation_log() -> list of recent operations
+    - create_archive_index() -> JSON index of archived models
+  - Progress callback: callback(current, total, filename)
+  - Operation log stored in archive dir
+  - Unit tests pass
+
+---
+
+# =============================================================================
+# TASK 7: UI - Statistics Panel
+# =============================================================================
+task_id: phase2_ui_statistics
+goal: Add storage statistics panel to Model Manager UI
+scope:
+  include:
+    - addons/model_manager.py (modify render method)
+  exclude:
+    - services/ (use existing services)
+constraints:
+  - Follow existing accordion UI pattern
+  - Use Gradio components (Charts, Dataframes)
+  - Lazy loading (only compute when accordion opened)
+expected_changes:
+  files:
+    - addons/model_manager.py
+  operations:
+    - modify: model_manager.py (add Statistics accordion)
+risk_level: medium
+acceptance_criteria:
+  - New "📈 Storage Statistics" accordion in UI
+  - Shows:
+    - Pie chart: Used vs Unused vs Missing
+    - Bar chart: Size by model type
+    - Table: Top 10 largest models
+    - Table: Size distribution histogram
+  - Updates after each analysis
+  - Responsive and fast rendering
+
+---
+
+# =============================================================================
+# TASK 8: UI - Duplicate Detection Panel
+# =============================================================================
+task_id: phase2_ui_duplicates
+goal: Add duplicate detection UI panel
+scope:
+  include:
+    - addons/model_manager.py (modify)
+  exclude:
+    - services/ (use existing DuplicateDetector)
+constraints:
+  - Follow existing accordion UI pattern
+  - Show duplicate groups clearly
+  - Allow selecting which to keep
+expected_changes:
+  files:
+    - addons/model_manager.py
+  operations:
+    - modify: model_manager.py (add Duplicates accordion)
+risk_level: medium
+acceptance_criteria:
+  - New "🔍 Duplicate Detection" accordion
+  - "Scan for Duplicates" button
+  - Table showing duplicate groups:
+    - Group number
+    - Filenames in group
+    - Sizes (should be identical)
+    - Status (Used/Unused)
+    - Checkbox to select for deletion
+  - "Keep Best" button (auto-select unused duplicates)
+  - "Delete Selected Duplicates" button
+  - Confirmation dialog before deletion
+
+---
+
+# =============================================================================
+# TASK 9: UI - Export Panel
+# =============================================================================
+task_id: phase2_ui_export
+goal: Add export functionality to Model Manager UI
+scope:
+  include:
+    - addons/model_manager.py (modify)
+  exclude:
+    - services/ (use existing ReportExporter)
+constraints:
+  - Follow existing accordion UI pattern
+  - Support all export formats (CSV, JSON, HTML)
+  - Allow filtering before export
+expected_changes:
+  files:
+    - addons/model_manager.py
+  operations:
+    - modify: model_manager.py (add Export accordion)
+risk_level: low
+acceptance_criteria:
+  - New "📄 Export Reports" accordion
+  - Export format dropdown (CSV, JSON, HTML)
+  - "Export Full Analysis" button
+  - "Export Filtered Models" button (current filter)
+  - "Export Summary" button (stats only)
+  - File download or save to path
+  - Status message showing export path
+
+---
+
+# =============================================================================
+# TASK 10: UI - Advanced Filters
+# =============================================================================
+task_id: phase2_ui_advanced_filters
+goal: Add advanced filtering UI to Model Management accordion
+scope:
+  include:
+    - addons/model_manager.py (modify)
+  exclude:
+    - services/ (use existing ModelFilter)
+constraints:
+  - Extend existing filter section
+  - Non-breaking change to existing filters
+  - Clear/reset filters button
+expected_changes:
+  files:
+    - addons/model_manager.py
+  operations:
+    - modify: model_manager.py (extend filters in Management accordion)
+risk_level: medium
+acceptance_criteria:
+  - Extended filter section with:
+    - Size range slider (min-max GB)
+    - Date picker (modified after/before)
+    - Workflow count range (min-max)
+    - Filename regex pattern input
+  - "Apply Advanced Filters" button
+  - "Clear All Filters" button
+  - Filters combine with existing status/type filters
+  - Filter state preserved during session
+
+---
+
+# =============================================================================
+# TASK 11: UI - Workflow References Panel
+# =============================================================================
+task_id: phase2_ui_workflow_refs
+goal: Add workflow reference details panel
+scope:
+  include:
+    - addons/model_manager.py (modify)
+  exclude:
+    - services/ (use existing WorkflowMapper)
+constraints:
+  - Follow existing accordion UI pattern
+  - Click on model row to see workflow details
+  - Link to workflow files
+expected_changes:
+  files:
+    - addons/model_manager.py
+  operations:
+    - modify: model_manager.py (add Workflow References panel)
+risk_level: medium
+acceptance_criteria:
+  - New "📝 Workflow References" accordion
+  - Click model in table -> shows workflows using it
+  - Shows for each workflow:
+    - Workflow filename
+    - Node ID and type using the model
+    - Path to workflow file
+  - Table: "Most Used Models" (top 10)
+  - Table: "Single-Use Models" (only 1 workflow)
+  - "Open Workflow" link/button (if feasible)
+
+---
+
+# =============================================================================
+# TASK 12: Unit Tests for Phase 2 Services
+# =============================================================================
+task_id: phase2_tests
+goal: Create comprehensive unit tests for all Phase 2 services
+scope:
+  include:
+    - tests/unit/test_duplicate_detector.py (new)
+    - tests/unit/test_storage_analyzer.py (new)
+    - tests/unit/test_workflow_mapper.py (new)
+    - tests/unit/test_report_exporter.py (new)
+    - tests/unit/test_model_filter.py (new)
+  exclude:
+    - services/ (test only, no modifications)
+    - addons/ (UI tests separate)
+constraints:
+  - Follow existing test patterns in tests/unit/
+  - Use pytest
+  - Mock file system operations
+  - Aim for 90%+ coverage per service
+expected_changes:
+  files:
+    - tests/unit/test_duplicate_detector.py
+    - tests/unit/test_storage_analyzer.py
+    - tests/unit/test_workflow_mapper.py
+    - tests/unit/test_report_exporter.py
+    - tests/unit/test_model_filter.py
+  operations:
+    - create: all test files
+risk_level: low
+acceptance_criteria:
+  - All tests pass with pytest
+  - Coverage >= 90% for each service
+  - Tests include:
+    - Happy path scenarios
+    - Edge cases (empty data, missing files)
+    - Error handling
+  - No external dependencies required
+
+---
+
+# =============================================================================
+# TASK 13: Documentation Update
+# =============================================================================
+task_id: phase2_documentation
+goal: Update MODEL_MANAGER.md documentation for Phase 2 features
+scope:
+  include:
+    - docs/addons/MODEL_MANAGER.md (update)
+    - docs/addons/TOOLS.md (update status)
+  exclude:
+    - Code files
+constraints:
+  - Follow existing documentation style
+  - Include usage examples
+  - Update architecture diagrams
+expected_changes:
+  files:
+    - docs/addons/MODEL_MANAGER.md
+    - docs/addons/TOOLS.md
+  operations:
+    - modify: MODEL_MANAGER.md (add Phase 2 sections)
+    - modify: TOOLS.md (update status)
+risk_level: low
+acceptance_criteria:
+  - Updated features list (Phase 2 complete)
+  - New sections for:
+    - Duplicate Detection
+    - Storage Statistics
+    - Export Reports
+    - Advanced Filtering
+    - Workflow References
+  - Updated architecture section
+  - Usage examples for each feature
+  - Updated troubleshooting section
+
+---
+
+# =============================================================================
+# IMPLEMENTATION ORDER (Recommended)
+# =============================================================================
+#
+# Phase 2.1 - Core Services (Week 1-2):
+#   1. phase2_duplicate_detector
+#   2. phase2_storage_stats
+#   3. phase2_workflow_mapper
+#   4. phase2_advanced_filter
+#   5. phase2_report_exporter
+#
+# Phase 2.2 - Extended Operations (Week 2):
+#   6. phase2_batch_operations
+#
+# Phase 2.3 - UI Integration (Week 3):
+#   7. phase2_ui_statistics
+#   8. phase2_ui_duplicates
+#   9. phase2_ui_export
+#   10. phase2_ui_advanced_filters
+#   11. phase2_ui_workflow_refs
+#
+# Phase 2.4 - Quality Assurance (Week 4):
+#   12. phase2_tests
+#   13. phase2_documentation
+#
+# =============================================================================
+# DEPENDENCIES
+# =============================================================================
+#
+# Task Dependencies:
+#   phase2_ui_statistics     -> phase2_storage_stats
+#   phase2_ui_duplicates     -> phase2_duplicate_detector
+#   phase2_ui_export         -> phase2_report_exporter
+#   phase2_ui_advanced_filters -> phase2_advanced_filter
+#   phase2_ui_workflow_refs  -> phase2_workflow_mapper
+#   phase2_tests             -> all service tasks
+#   phase2_documentation     -> all tasks
+#
+# =============================================================================

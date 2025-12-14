@@ -2,8 +2,10 @@
 import copy
 import glob
 import os
+import random
 import re
 import shutil
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
 from domain.models import Storyboard, SelectionSet, PlanSegment, GenerationPlan
@@ -73,6 +75,11 @@ class VideoGenerationService:
 
         if not extractor.is_available():
             logs.append("⚠️ ffmpeg nicht gefunden – LastFrame-Kette wird übersprungen")
+
+        # Cleanup old video files before starting generation
+        cleanup_count = self._cleanup_old_video_files()
+        if cleanup_count > 0:
+            logs.append(f"🧹 {cleanup_count} alte Video-Datei(en) in temp-Ordner verschoben")
 
         for entry in working_plan:
             clip_label = self._format_clip_label(entry)
@@ -172,11 +179,15 @@ class VideoGenerationService:
         )
 
         prompt_id = comfy_api.queue_prompt(updated_workflow)
+        logger.info(f"Video job queued: {prompt_id}, waiting for completion...")
         result = comfy_api.monitor_progress(prompt_id, timeout=1800)
+        logger.info(f"Video job {prompt_id} monitor returned: status={result.get('status')}")
 
         if result["status"] != "success":
             raise RuntimeError(result.get("error", "ComfyUI-Job fehlgeschlagen"))
 
+        # Note: ComfyUI reports completion before video file is fully written to disk
+        # The retry loop in _copy_video_outputs handles this delay
         video_paths = self._copy_video_outputs(entry, project)
 
         if not video_paths:
@@ -186,8 +197,17 @@ class VideoGenerationService:
             )
 
         last_frame_path = None
-        if entry.get("segment_total", 1) > entry.get("segment_index", 1):
+        segment_total = entry.get("segment_total", 1)
+        segment_index = entry.get("segment_index", 1)
+        if segment_total > segment_index:
+            logger.info(f"Segment {segment_index}/{segment_total} - extracting last frame from: {video_paths[-1]}")
             last_frame_path = extractor.extract(video_paths[-1], entry)
+            if last_frame_path:
+                logger.info(f"✓ LastFrame extracted: {last_frame_path}")
+            else:
+                logger.error(f"✗ LastFrame extraction failed for: {video_paths[-1]}")
+        else:
+            logger.debug(f"Segment {segment_index}/{segment_total} - no LastFrame needed (final segment)")
 
         return video_paths, last_frame_path
 
@@ -222,17 +242,28 @@ class VideoGenerationService:
         Returns:
             Updated workflow dict
         """
+        # Generate random seed to prevent ComfyUI caching
+        random_seed = random.randint(1, 2**32 - 1)
+        logger.debug(f"Using random seed {random_seed} to prevent caching")
+
         updated = comfy_api.update_workflow_params(
             workflow,
             prompt=prompt,
             width=width,
             height=height,
             filename_prefix=filename_prefix,
+            seed=random_seed,
         )
 
         for node_data in updated.values():
             inputs = node_data.get("inputs", {})
             node_type = node_data.get("class_type", "")
+
+            # Inject random seed to prevent caching (backup for nodes not caught by updaters)
+            if "seed" in inputs:
+                inputs["seed"] = random_seed
+            if "noise_seed" in inputs:
+                inputs["noise_seed"] = random_seed
 
             # Inject startframe path
             if start_frame_path and node_type in {"LoadImage", "ImageInput", "LoadImageForVideo"}:
@@ -279,6 +310,9 @@ class VideoGenerationService:
         """
         Copy generated video files from ComfyUI/output to project/video folder.
 
+        Includes retry mechanism to handle race condition where ComfyUI reports
+        success via WebSocket before the file is fully written to disk.
+
         Args:
             entry: Plan segment
             project: Project metadata
@@ -286,6 +320,14 @@ class VideoGenerationService:
         Returns:
             List of copied video file paths
         """
+        import time
+        # Video generation (especially Wan 2.2 14B) can take several minutes
+        # Get timeout values from config (or use defaults)
+        config = self.project_store.config
+        initial_wait = config.get_video_initial_wait()  # default: 60s before first check
+        retry_delay = float(config.get_video_retry_delay())  # default: 30s between checks
+        max_retries = config.get_video_max_retries()  # default: 20 retries
+
         try:
             comfy_output = self.project_store.comfy_output_dir()
         except FileNotFoundError as exc:
@@ -295,39 +337,71 @@ class VideoGenerationService:
         dest_dir = self.project_store.ensure_dir(project, "video")
 
         extensions = ("mp4", "webm", "mov", "gif")
-        copied: List[str] = []
         clip_name = entry.get("clip_name") or entry.get("filename_base") or entry.get("shot_id", "clip")
         base_name = entry.get("filename_base", clip_name)
         project_path = project.get("path", "")
 
-        for ext in extensions:
-            patterns = [
-                os.path.join(comfy_output, f"{clip_name}*.{ext}"),
-                os.path.join(comfy_output, "**", f"{clip_name}*.{ext}"),
-                os.path.join(comfy_output, "video", f"{clip_name}*.{ext}"),
-                os.path.join(comfy_output, "video", "**", f"{clip_name}*.{ext}"),
-                # Fallback to ComfyUI default naming
-                os.path.join(comfy_output, "video", f"ComfyUI_*.{ext}"),
-                os.path.join(comfy_output, "video", "**", f"ComfyUI_*.{ext}"),
-            ]
+        # Initial wait before first check (video encoding takes time)
+        logger.info(f"Waiting {initial_wait}s for video encoding to complete...")
+        time.sleep(initial_wait)
+
+        # Retry loop to wait for video file to appear on disk
+        logger.info(f"Searching for video files with clip_name='{clip_name}' in {comfy_output}")
+
+        for attempt in range(max_retries):
+            copied: List[str] = []
             seen = set()
 
-            for pattern in patterns:
-                for src in glob.glob(pattern, recursive="**" in pattern):
-                    if src in seen:
-                        continue
-                    # Skip files already in project directory
-                    if project_path and os.path.commonpath([src, project_path]) == project_path:
-                        continue
+            for ext in extensions:
+                patterns = [
+                    os.path.join(comfy_output, f"{clip_name}*.{ext}"),
+                    os.path.join(comfy_output, "video", f"{clip_name}*.{ext}"),
+                    # Fallback to ComfyUI default naming
+                    os.path.join(comfy_output, "video", f"ComfyUI_*.{ext}"),
+                ]
 
-                    seen.add(src)
-                    dest_filename = self._build_video_filename(base_name, entry, ext, dest_dir)
-                    dest = os.path.join(dest_dir, dest_filename)
-                    shutil.copy2(src, dest)
-                    copied.append(dest)
-                    logger.info(f"Copied video: {src} → {dest}")
+                for pattern in patterns:
+                    matches = glob.glob(pattern)
+                    if matches:
+                        logger.info(f"Pattern '{pattern}' found {len(matches)} files: {matches}")
+                    for src in matches:
+                        if src in seen:
+                            logger.debug(f"Skipping duplicate: {src}")
+                            continue
+                        # Skip files already in project directory
+                        if project_path and os.path.commonpath([src, project_path]) == project_path:
+                            logger.debug(f"Skipping file in project path: {src}")
+                            continue
 
-        return copied
+                        seen.add(src)
+                        dest_filename = self._build_video_filename(base_name, entry, ext, dest_dir)
+                        dest = os.path.join(dest_dir, dest_filename)
+                        logger.info(f"Moving video from {src} to {dest}")
+                        try:
+                            # MOVE instead of copy to avoid picking up same file for next shot
+                            shutil.move(src, dest)
+                            copied.append(dest)
+                            logger.info(f"✓ Successfully moved video: {src} → {dest}")
+                        except Exception as move_error:
+                            logger.error(f"Failed to move {src} to {dest}: {move_error}")
+
+            if copied:
+                return copied
+
+            if attempt < max_retries - 1:
+                # Log status on each retry (every 30s)
+                try:
+                    all_files = os.listdir(comfy_output)
+                    video_files = [f for f in all_files if f.endswith(('.mp4', '.webm', '.mov', '.gif'))]
+                    elapsed = initial_wait + (attempt + 1) * retry_delay
+                    logger.info(f"Check {attempt + 1}/{max_retries} ({elapsed:.0f}s elapsed): Looking for '{clip_name}*', videos in output: {video_files}")
+                except Exception:
+                    pass
+                time.sleep(retry_delay)
+
+        total_wait = initial_wait + max_retries * retry_delay
+        logger.warning(f"No video files found for '{clip_name}' after {total_wait:.0f}s total wait")
+        return []
 
     def _build_video_filename(
         self,
@@ -349,13 +423,19 @@ class VideoGenerationService:
             Unique filename
         """
         safe_base = re.sub(r"[^a-zA-Z0-9_-]+", "_", base_name) or entry.get("clip_name", "clip")
-        candidate = f"{safe_base}.{ext}"
         variant = entry.get("selected_variant")
-        counter = 1
 
+        # Start with variant suffix if available, otherwise plain name
+        if variant:
+            candidate = f"{safe_base}_v{variant}.{ext}"
+        else:
+            candidate = f"{safe_base}.{ext}"
+
+        # Add counter to ensure uniqueness if file already exists
+        counter = 2
+        base_candidate = candidate.replace(f".{ext}", "")
         while os.path.exists(os.path.join(dest_dir, candidate)):
-            suffix = f"_v{variant}" if variant else f"_{counter}"
-            candidate = f"{safe_base}{suffix}.{ext}"
+            candidate = f"{base_candidate}_{counter}.{ext}"
             counter += 1
 
         return candidate
@@ -401,6 +481,83 @@ class VideoGenerationService:
                 return entry.get("plan_id") or entry.get("shot_id")
 
         return None
+
+    def _cleanup_old_video_files(self) -> int:
+        """Move leftover video files from ComfyUI output directory to temp folder.
+
+        This prevents picking up old files from failed/previous runs.
+        Files are moved to output/temp/{timestamp}/ instead of deleted.
+
+        Returns:
+            Number of files moved
+        """
+        try:
+            comfy_output = self.project_store.comfy_output_dir()
+        except FileNotFoundError as exc:
+            logger.warning(f"ComfyUI output directory not found: {exc}")
+            return 0
+
+        video_extensions = ("mp4", "webm", "mov", "gif")
+        image_extensions = ("png", "jpg", "jpeg")
+        moved_count = 0
+        files_to_move = []
+
+        # Get project video directory for cleanup
+        try:
+            project = self.project_store.get_active_project(refresh=True)
+            project_video_dir = self.project_store.project_path(project, "video") if project else None
+            project_startframes_dir = os.path.join(project_video_dir, "_startframes") if project_video_dir else None
+        except Exception:
+            project_video_dir = None
+            project_startframes_dir = None
+
+        # Collect video files from:
+        # 1. Main ComfyUI output
+        # 2. ComfyUI output/video subdirectory
+        # 3. Project video directory
+        # 4. Project _startframes directory
+        video_subdir = os.path.join(comfy_output, "video")
+
+        search_dirs = [
+            (comfy_output, video_extensions),
+            (video_subdir, video_extensions),
+        ]
+
+        # Add project directories if available
+        if project_video_dir and os.path.exists(project_video_dir):
+            search_dirs.append((project_video_dir, video_extensions))
+        if project_startframes_dir and os.path.exists(project_startframes_dir):
+            search_dirs.append((project_startframes_dir, image_extensions))
+
+        for search_dir, extensions in search_dirs:
+            for ext in extensions:
+                found_files = glob.glob(os.path.join(search_dir, f"*.{ext}"))
+                # Skip _state.json and other non-media files
+                found_files = [f for f in found_files if not f.endswith('.json')]
+                if found_files:
+                    logger.info(f"Cleanup: Found {len(found_files)} .{ext} files in {search_dir}")
+                    files_to_move.extend(found_files)
+
+        if not files_to_move:
+            return 0
+
+        # Create temp directory with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        temp_dir = os.path.join(comfy_output, "temp", timestamp)
+        os.makedirs(temp_dir, exist_ok=True)
+
+        logger.info(f"Moving {len(files_to_move)} old video file(s) to {temp_dir}")
+
+        for old_file in files_to_move:
+            try:
+                dest = os.path.join(temp_dir, os.path.basename(old_file))
+                shutil.move(old_file, dest)
+                moved_count += 1
+                logger.debug(f"Moved old video file: {old_file} → {temp_dir}")
+            except OSError as e:
+                logger.warning(f"Failed to move {old_file}: {e}")
+
+        return moved_count
 
 
 __all__ = ["VideoGenerationService"]

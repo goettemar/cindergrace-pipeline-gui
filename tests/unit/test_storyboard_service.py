@@ -51,6 +51,19 @@ class TestStoryboardServiceLoadFromFile:
         assert "Ungültiges JSON" in str(exc_info.value)
 
     @pytest.mark.unit
+    def test_load_wraps_unexpected_error(self, tmp_path, monkeypatch):
+        """Should wrap unexpected errors into ValidationError"""
+        storyboard_file = tmp_path / "unexpected.json"
+        storyboard_file.write_text("{}", encoding="utf-8")
+
+        monkeypatch.setattr("json.load", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
+
+        with pytest.raises(ValidationError) as exc_info:
+            StoryboardService.load_from_file(str(storyboard_file))
+
+        assert "Fehler beim Laden" in str(exc_info.value)
+
+    @pytest.mark.unit
     def test_load_minimal_storyboard(self, tmp_path, sample_storyboard_minimal):
         """Should load minimal valid storyboard"""
         # Arrange
@@ -243,6 +256,19 @@ class TestLoadSelection:
             load_selection(str(invalid_file))
 
         assert "Ungültiges JSON" in str(exc_info.value)
+
+    @pytest.mark.unit
+    def test_load_selection_wraps_unexpected_error(self, tmp_path, monkeypatch):
+        """Should wrap unexpected errors in ValidationError"""
+        selection_file = tmp_path / "unexpected_selection.json"
+        selection_file.write_text("{}", encoding="utf-8")
+
+        monkeypatch.setattr("json.load", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")))
+
+        with pytest.raises(ValidationError) as exc_info:
+            load_selection(str(selection_file))
+
+        assert "Fehler beim Laden" in str(exc_info.value)
 
     @pytest.mark.unit
     def test_selection_preserves_metadata(self, sample_selection_file):

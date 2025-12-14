@@ -1,4 +1,5 @@
 """Unit tests for KeyframeService"""
+import glob
 import pytest
 import os
 import json
@@ -321,6 +322,48 @@ class TestKeyframeGenerationServiceCopyImages:
         # Assert
         assert result == []
 
+    @pytest.mark.unit
+    def test_copy_generated_images_skips_duplicate_destinations(self, tmp_path, create_test_image):
+        """Should skip files with duplicate destination paths"""
+        # Arrange
+        mock_config = Mock(spec=ConfigManager)
+        mock_store = Mock(spec=ProjectStore)
+
+        # Create source directory structure with subdirectory
+        comfy_output_dir = tmp_path / "comfyui" / "output"
+        comfy_output_dir.mkdir(parents=True)
+        subdir = comfy_output_dir / "subdir"
+        subdir.mkdir()
+
+        # Create destination directory (project keyframes)
+        project_keyframes_dir = tmp_path / "project" / "keyframes"
+        project_keyframes_dir.mkdir(parents=True)
+
+        mock_store.comfy_output_dir = Mock(return_value=str(comfy_output_dir))
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+
+        # Create images with same basename in different directories
+        # These would both try to move to "test-shot_v1_00001_.png" in dest
+        image_in_root = comfy_output_dir / "test-shot_v1_00001_.png"
+        image_in_subdir = subdir / "test-shot_v1_00001_.png"
+        create_test_image(str(image_in_root))
+        create_test_image(str(image_in_subdir))
+
+        # Act
+        result = service._copy_generated_images(
+            variant_name="test-shot_v1",
+            output_dir=str(project_keyframes_dir),
+            api_result={}
+        )
+
+        # Assert
+        # Only one image should be moved (the first one found)
+        assert len(result) == 1
+        assert (project_keyframes_dir / "test-shot_v1_00001_.png").exists()
+        # The second source should still exist because it was skipped
+        assert image_in_subdir.exists()
+
 
 class TestKeyframeGenerationServiceRunGeneration:
     """Test KeyframeGenerationService.run_generation() - Basic scenarios"""
@@ -364,6 +407,9 @@ class TestKeyframeGenerationServiceRunGeneration:
         assert "connection" in status.lower()
         assert images == []
         assert service.is_running is False
+        # Generator should stop after failure branch
+        with pytest.raises(StopIteration):
+            next(generator)
 
     @pytest.mark.unit
     @patch('services.keyframe_service.ComfyUIAPI')
@@ -405,6 +451,253 @@ class TestKeyframeGenerationServiceRunGeneration:
         assert "error" in status.lower() or "❌" in status
         assert "workflow" in status.lower()
         assert images == []
+        with pytest.raises(StopIteration):
+            next(generator)
+
+    @pytest.mark.unit
+    @patch('services.keyframe_service.ComfyUIAPI')
+    def test_run_generation_handles_exception(self, mock_api_class, tmp_path):
+        """Should yield error when unexpected exception occurs"""
+        mock_api_instance = Mock()
+        mock_api_instance.test_connection.return_value = {"connected": True}
+        mock_api_instance.load_workflow.return_value = {}
+        mock_api_class.return_value = mock_api_instance
+
+        mock_config = Mock(spec=ConfigManager)
+        workflow_dir = tmp_path / "workflows"
+        workflow_dir.mkdir()
+        workflow_path = workflow_dir / "wf.json"
+        workflow_path.write_text("{}")
+        mock_config.get_workflow_dir.return_value = str(workflow_dir)
+        mock_store = Mock(spec=ProjectStore)
+        mock_store.ensure_dir.side_effect = RuntimeError("ensure-dir failed")
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        storyboard = Storyboard(project="Test", shots=[], raw={})
+        checkpoint = {
+            "storyboard_file": "sb.json",
+            "variants_per_shot": 1,
+            "base_seed": 0,
+            "completed_shots": [],
+            "total_images_generated": 0,
+            "status": "running",
+        }
+        project = {"path": str(tmp_path)}
+
+        gen = service.run_generation(
+            storyboard=storyboard,
+            workflow_file=str(workflow_path.name),
+            checkpoint=checkpoint,
+            project=project,
+            comfy_url="http://127.0.0.1:8188",
+        )
+
+        images, status, *_ = next(gen)
+        assert images == []
+        assert "Fehler" in status or "error" in status.lower()
+        assert checkpoint["status"] == "error"
+
+    @pytest.mark.unit
+    @patch('services.keyframe_service.ComfyUIAPI')
+    def test_run_generation_success_flow(self, mock_api_class, tmp_path):
+        """Should complete generation loop and mark checkpoint finished"""
+        mock_api_instance = Mock()
+        mock_api_instance.test_connection.return_value = {"connected": True}
+        mock_api_instance.load_workflow.return_value = {}
+        mock_api_class.return_value = mock_api_instance
+
+        # Prepare workflow file on disk
+        workflow_dir = tmp_path / "workflows"
+        workflow_dir.mkdir()
+        workflow_path = workflow_dir / "wf.json"
+        workflow_path.write_text("{}")
+
+        mock_config = Mock(spec=ConfigManager)
+        mock_config.get_workflow_dir.return_value = str(workflow_dir)
+        mock_config.get_resolution_tuple.return_value = (1024, 576)
+
+        mock_store = Mock(spec=ProjectStore)
+        mock_store.ensure_dir.side_effect = lambda project, name=None: str(tmp_path / "out")
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        service._generate_shot = Mock(
+            return_value=iter([
+                (
+                    ["img1"],
+                    "shot-status",
+                    "progress",
+                    {
+                        "storyboard_file": "sb.json",
+                        "completed_shots": ["001"],
+                        "total_images_generated": 1,
+                        "status": "running",
+                    },
+                    "current",
+                ),
+            ])
+        )
+
+        storyboard = Storyboard.from_dict({"project": "Test", "shots": [{"shot_id": "001", "prompt": "p", "filename_base": "shot"}]})
+        checkpoint = {
+            "storyboard_file": "sb.json",
+            "variants_per_shot": 1,
+            "base_seed": 0,
+            "completed_shots": [],
+            "total_images_generated": 0,
+            "status": "running",
+        }
+        project = {"path": str(tmp_path)}
+
+        gen = service.run_generation(
+            storyboard=storyboard,
+            workflow_file="wf.json",
+            checkpoint=checkpoint,
+            project=project,
+            comfy_url="http://127.0.0.1:8188",
+        )
+
+        results = list(gen)
+        # Last yield should mark completed status
+        final = results[-1]
+        assert final[3]["status"] == "completed"
+        assert "Complete" in final[1]
+
+    @pytest.mark.unit
+    @patch('services.keyframe_service.ComfyUIAPI')
+    def test_run_generation_skips_completed_shot(self, mock_api_class, tmp_path):
+        """Should skip shots already marked as completed"""
+        mock_config = Mock(spec=ConfigManager)
+        workflow_dir = tmp_path / "workflows"
+        workflow_dir.mkdir()
+        workflow_path = workflow_dir / "wf.json"
+        workflow_path.write_text("{}")
+        mock_config.get_workflow_dir.return_value = str(workflow_dir)
+        mock_config.get_resolution_tuple.return_value = (640, 480)
+
+        mock_store = Mock(spec=ProjectStore)
+        mock_store.ensure_dir.return_value = str(tmp_path / "out")
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        mock_api = Mock()
+        mock_api.test_connection.return_value = {"connected": True}
+        mock_api.load_workflow.return_value = {}
+        mock_api_class.return_value = mock_api
+        service.api = mock_api
+        service.api.test_connection.return_value = {"connected": True}
+        service.api.load_workflow.return_value = {}
+        service._generate_shot = Mock(return_value=iter([]))
+
+        storyboard = Storyboard.from_dict(
+            {"project": "Test", "shots": [{"shot_id": "001", "prompt": "p", "filename_base": "shot"}]}
+        )
+        checkpoint = {
+            "storyboard_file": "sb.json",
+            "variants_per_shot": 1,
+            "base_seed": 0,
+            "completed_shots": ["001"],
+            "total_images_generated": 0,
+            "status": "running",
+        }
+
+        gen = service.run_generation(
+            storyboard=storyboard,
+            workflow_file=workflow_path.name,
+            checkpoint=checkpoint,
+            project={"path": str(tmp_path)},
+            comfy_url="http://127.0.0.1:8188",
+        )
+
+        results = list(gen)
+        assert service._generate_shot.call_count == 0
+        assert results[-1][3]["status"] == "completed"
+
+    @pytest.mark.unit
+    @patch('services.keyframe_service.ComfyUIAPI')
+    def test_run_generation_honors_stop_requested(self, mock_api_class, tmp_path):
+        """Should delegate to _handle_stop when stop_requested is True"""
+        mock_config = Mock(spec=ConfigManager)
+        workflow_dir = tmp_path / "workflows"
+        workflow_dir.mkdir()
+        workflow_path = workflow_dir / "wf.json"
+        workflow_path.write_text("{}")
+        mock_config.get_workflow_dir.return_value = str(workflow_dir)
+        mock_config.get_resolution_tuple.return_value = (640, 480)
+
+        mock_store = Mock(spec=ProjectStore)
+        mock_store.ensure_dir.return_value = str(tmp_path / "out")
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        service.stop_requested = True
+        service.api = Mock()
+        service.api.test_connection.return_value = {"connected": True}
+        service.api.load_workflow.return_value = {}
+        service._handle_stop = Mock(return_value=iter([([], "stopped", "progress", {}, "stop")]))
+        mock_api_class.return_value = service.api
+
+        storyboard = Storyboard.from_dict(
+            {"project": "Test", "shots": [{"shot_id": "001", "prompt": "p", "filename_base": "shot"}]}
+        )
+        checkpoint = {
+            "storyboard_file": "sb.json",
+            "variants_per_shot": 1,
+            "base_seed": 0,
+            "completed_shots": [],
+            "total_images_generated": 0,
+            "status": "running",
+        }
+
+        gen = service.run_generation(
+            storyboard=storyboard,
+            workflow_file=workflow_path.name,
+            checkpoint=checkpoint,
+            project={"path": str(tmp_path)},
+            comfy_url="http://127.0.0.1:8188",
+        )
+
+        results = list(gen)
+        assert any("stopped" in status.lower() for *_imgs, status, _progress, _cp, _curr in results)
+
+    @pytest.mark.unit
+    def test_generate_shot_invokes_progress_callback(self):
+        """Should call progress_callback before yielding"""
+        mock_config = Mock(spec=ConfigManager)
+        mock_config.get_resolution_tuple.return_value = (640, 480)
+        mock_store = Mock(spec=ProjectStore)
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        service.stop_requested = False
+        service._generate_variant = Mock(return_value=iter([]))
+        service._save_checkpoint = Mock()
+        service.config = mock_config
+
+        checkpoint = {
+            "completed_shots": [],
+            "total_images_generated": 0,
+            "status": "running",
+            "variants_per_shot": 1,
+            "storyboard_file": "sb.json",
+        }
+
+        calls = []
+        gen = service._generate_shot(
+            shot={"prompt": "p", "filename_base": "shot"},
+            shot_idx=0,
+            shot_id="001",
+            workflow={},
+            variants_per_shot=1,
+            base_seed=0,
+            output_dir="/tmp",
+            checkpoint=checkpoint,
+            total_shots=1,
+            project={"path": "/tmp"},
+            images_done=0,
+            total_images_est=1,
+            progress_callback=lambda pct, desc=None: calls.append((pct, desc)),
+        )
+
+        list(gen)
+        assert calls
+        assert "001" in calls[0][1]
 
 
 class TestKeyframeGenerationServiceIntegration:
@@ -436,3 +729,312 @@ class TestKeyframeGenerationServiceIntegration:
         service.stop_requested = False
         assert service.is_running is False
         assert service.stop_requested is False
+
+
+class TestKeyframeGenerationServiceInternals:
+    """Unit tests for internal generation helpers"""
+
+    @pytest.mark.unit
+    def test_generate_variant_success_path(self, tmp_path):
+        """Should increment counters and save checkpoints on success"""
+        mock_config = Mock(spec=ConfigManager)
+        mock_config.get_resolution_tuple.return_value = (1280, 720)
+        mock_store = Mock(spec=ProjectStore)
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        service.api = Mock()
+        service.api.update_workflow_params.return_value = {"workflow": {}}
+        service.api.queue_prompt.return_value = "pid-1"
+        service.api.monitor_progress.return_value = {"status": "success"}
+        service._copy_generated_images = Mock(return_value=[str(tmp_path / "img.png")])
+        service._save_checkpoint = Mock()
+        progress_calls = []
+
+        checkpoint = {
+            "storyboard_file": "sb.json",
+            "variants_per_shot": 1,
+            "base_seed": 42,
+            "completed_shots": [],
+            "total_images_generated": 0,
+            "status": "running",
+        }
+
+        generator = service._generate_variant(
+            shot={"prompt": "p"},
+            shot_id="001",
+            shot_idx=0,
+            variant_idx=0,
+            variants_per_shot=1,
+            filename_base="shot",
+            workflow={},
+            base_seed=100,
+            res_width=640,
+            res_height=360,
+            output_dir=str(tmp_path),
+            checkpoint=checkpoint,
+            total_shots=1,
+            project={"path": str(tmp_path)},
+            images_done=0,
+            total_images_est=1,
+            progress_callback=lambda pct, desc=None: progress_calls.append((pct, desc)),
+        )
+
+        results = list(generator)
+        assert results  # One yield
+        images, status, _progress, updated_cp, _display = results[0]
+        assert images == [str(tmp_path / "img.png")]
+        assert "Variant 1" in status
+        assert updated_cp["total_images_generated"] == 1
+        service._save_checkpoint.assert_called_once()
+        assert progress_calls  # progress callback invoked
+
+    @pytest.mark.unit
+    def test_generate_variant_failure_status(self):
+        """Should yield failure status when monitor_progress reports error"""
+        mock_config = Mock(spec=ConfigManager)
+        mock_config.get_resolution_tuple.return_value = (1280, 720)
+        mock_store = Mock(spec=ProjectStore)
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        service.api = Mock()
+        service.api.update_workflow_params.return_value = {}
+        service.api.queue_prompt.return_value = "pid-err"
+        service.api.monitor_progress.return_value = {"status": "error", "error": "boom"}
+        service._copy_generated_images = Mock(return_value=[])
+        service._save_checkpoint = Mock()
+
+        checkpoint = {"completed_shots": [], "total_images_generated": 0, "status": "running", "variants_per_shot": 1}
+
+        generator = service._generate_variant(
+            shot={"prompt": "p"},
+            shot_id="001",
+            shot_idx=0,
+            variant_idx=0,
+            variants_per_shot=1,
+            filename_base="shot",
+            workflow={},
+            base_seed=100,
+            res_width=640,
+            res_height=360,
+            output_dir="/tmp",
+            checkpoint=checkpoint,
+            total_shots=1,
+            project={"path": "/tmp"},
+            images_done=0,
+            total_images_est=1,
+        )
+
+        images, status, _progress, updated_cp, _display = next(generator)
+        assert images == []
+        assert "failed" in status.lower() or "✗" in status
+        assert updated_cp["total_images_generated"] == 0
+
+    @pytest.mark.unit
+    def test_generate_variant_copy_failure(self):
+        """Should warn and yield copy-failed status if no images copied"""
+        mock_config = Mock(spec=ConfigManager)
+        mock_config.get_resolution_tuple.return_value = (1280, 720)
+        mock_store = Mock(spec=ProjectStore)
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        service.api = Mock()
+        service.api.update_workflow_params.return_value = {}
+        service.api.queue_prompt.return_value = "pid-ok"
+        service.api.monitor_progress.return_value = {"status": "success"}
+        service._copy_generated_images = Mock(return_value=[])
+
+        checkpoint = {"completed_shots": [], "total_images_generated": 0, "status": "running", "variants_per_shot": 1}
+
+        gen = service._generate_variant(
+            shot={"prompt": "p"},
+            shot_id="001",
+            shot_idx=0,
+            variant_idx=0,
+            variants_per_shot=1,
+            filename_base="shot",
+            workflow={},
+            base_seed=100,
+            res_width=640,
+            res_height=360,
+            output_dir="/tmp",
+            checkpoint=checkpoint,
+            total_shots=1,
+            project={"path": "/tmp"},
+            images_done=0,
+            total_images_est=1,
+        )
+
+        images, status, _progress, _cp, _display = next(gen)
+        assert images == []
+        assert "copy failed" in status.lower() or "⚠️" in status
+
+    @pytest.mark.unit
+    def test_generate_variant_handles_exception(self):
+        """Should yield error status when generation throws"""
+        mock_config = Mock(spec=ConfigManager)
+        mock_config.get_resolution_tuple.return_value = (640, 480)
+        mock_store = Mock(spec=ProjectStore)
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        service.api = Mock()
+        service.api.update_workflow_params.return_value = {}
+        service.api.queue_prompt.side_effect = RuntimeError("api down")
+
+        checkpoint = {
+            "storyboard_file": "sb.json",
+            "completed_shots": [],
+            "total_images_generated": 0,
+        }
+
+        gen = service._generate_variant(
+            shot={"prompt": "p", "filename_base": "shot"},
+            shot_id="001",
+            shot_idx=0,
+            variant_idx=0,
+            variants_per_shot=1,
+            filename_base="shot",
+            workflow={},
+            base_seed=0,
+            res_width=640,
+            res_height=480,
+            output_dir="out",
+            checkpoint=checkpoint,
+            total_shots=1,
+            project={},
+            images_done=0,
+            total_images_est=1,
+            progress_callback=None,
+            current_shot_display="display",
+        )
+
+        images, status, *_ = next(gen)
+        assert images == []
+        assert "error" in status.lower()
+
+    @pytest.mark.unit
+    def test_copy_generated_images_handles_errors(self, tmp_path, monkeypatch):
+        """_copy_generated_images should swallow unexpected errors"""
+        mock_config = Mock(spec=ConfigManager)
+        mock_store = Mock(spec=ProjectStore)
+        mock_store.comfy_output_dir.return_value = str(tmp_path)
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        monkeypatch.setattr("glob.glob", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("glob failed")))
+
+        copied = service._copy_generated_images("var", str(tmp_path), {"output_images": []})
+        assert copied == []
+
+    @pytest.mark.unit
+    def test_save_checkpoint_handles_io_error(self, tmp_path, monkeypatch):
+        """_save_checkpoint should log and continue on failure"""
+        mock_config = Mock(spec=ConfigManager)
+        mock_store = Mock(spec=ProjectStore)
+        mock_store.ensure_dir.return_value = str(tmp_path)
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        monkeypatch.setattr("builtins.open", lambda *_a, **_k: (_ for _ in ()).throw(IOError("disk full")))
+
+        # Should not raise
+        service._save_checkpoint({"status": "running"}, "sb.json", {"path": str(tmp_path)})
+
+    @pytest.mark.unit
+    def test_generate_shot_stops_on_flag(self):
+        """Should stop early when stop_requested is True"""
+        mock_config = Mock(spec=ConfigManager)
+        mock_config.get_resolution_tuple.return_value = (1024, 576)
+        mock_store = Mock(spec=ProjectStore)
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        service.stop_requested = True
+        service._save_checkpoint = Mock()
+        service._generate_variant = Mock()
+
+        checkpoint = {
+            "completed_shots": [],
+            "total_images_generated": 0,
+            "status": "running",
+            "variants_per_shot": 1,
+            "storyboard_file": "sb.json",
+        }
+
+        gen = service._generate_shot(
+            shot={"prompt": "p", "filename_base": "shot"},
+            shot_idx=0,
+            shot_id="001",
+            workflow={},
+            variants_per_shot=1,
+            base_seed=0,
+            output_dir="/tmp",
+            checkpoint=checkpoint,
+            total_shots=1,
+            project={"path": "/tmp"},
+            images_done=0,
+            total_images_est=1,
+        )
+
+        results = list(gen)
+        # Only initial yield, no completion checkpoint
+        assert len(results) == 1
+        assert checkpoint["completed_shots"] == []
+        service._save_checkpoint.assert_not_called()
+
+    @pytest.mark.unit
+    def test_generate_shot_marks_completed(self):
+        """Should append shot to completed_shots after variants"""
+        mock_config = Mock(spec=ConfigManager)
+        mock_config.get_resolution_tuple.return_value = (1024, 576)
+        mock_store = Mock(spec=ProjectStore)
+
+        service = KeyframeGenerationService(mock_config, mock_store)
+        service.stop_requested = False
+
+        def fake_variant(**_kwargs):
+            yield ["img"], "status", "progress", _kwargs["checkpoint"], "display"
+
+        service._generate_variant = Mock(side_effect=fake_variant)
+        service._save_checkpoint = Mock()
+
+        checkpoint = {
+            "completed_shots": [],
+            "total_images_generated": 0,
+            "status": "running",
+            "variants_per_shot": 1,
+            "storyboard_file": "sb.json",
+        }
+
+        gen = service._generate_shot(
+            shot={"prompt": "p", "filename_base": "shot"},
+            shot_idx=0,
+            shot_id="001",
+            workflow={},
+            variants_per_shot=1,
+            base_seed=0,
+            output_dir="/tmp",
+            checkpoint=checkpoint,
+            total_shots=1,
+            project={"path": "/tmp"},
+            images_done=0,
+            total_images_est=1,
+        )
+
+        results = list(gen)
+        assert checkpoint["completed_shots"] == ["001"]
+        service._save_checkpoint.assert_called()
+        assert any("abgeschlossen" in r[1].lower() or "status" in r[1].lower() for r in results)
+
+    @pytest.mark.unit
+    def test_handle_stop_sets_status_and_returns_progress(self):
+        """Should mark checkpoint stopped and return progress info"""
+        mock_config = Mock(spec=ConfigManager)
+        mock_store = Mock(spec=ProjectStore)
+        service = KeyframeGenerationService(mock_config, mock_store)
+        service._save_checkpoint = Mock()
+
+        checkpoint = {"status": "running", "storyboard_file": "sb.json"}
+        gen = service._handle_stop(checkpoint, ["img"], total_shots=2, project={"path": "/tmp"})
+        images, status, progress, updated_cp, current = next(gen)
+
+        assert updated_cp["status"] == "stopped"
+        assert "gestoppt" in status.lower()
+        assert "Progress" in progress
+        assert "Stopped" in current

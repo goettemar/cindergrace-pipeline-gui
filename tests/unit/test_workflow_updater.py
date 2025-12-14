@@ -49,3 +49,27 @@ def test_generic_seed_applies_to_unknown_nodes():
     updated = updater.update(workflow, seed=777)
 
     assert updated["42"]["inputs"]["seed"] == 777
+
+
+def test_update_returns_non_dict_workflow_unchanged():
+    updater = WorkflowUpdater(default_updaters())
+    workflow = ["not", "a", "dict"]
+
+    updated = updater.update(workflow, prompt="ignored")
+
+    assert updated == workflow  # passthrough when workflow is not dict
+
+
+def test_update_recovers_when_inputs_not_dict():
+    updater = WorkflowUpdater(default_updaters())
+    workflow = {
+        "node": {
+            "class_type": "CLIPTextEncode",
+            "inputs": "not-a-dict",
+        }
+    }
+
+    updated = updater.update(workflow, prompt="hello")
+
+    assert isinstance(updated["node"]["inputs"], dict)
+    assert updated["node"]["inputs"]["text"] == "hello"

@@ -109,6 +109,28 @@ class EmptyLatentImageUpdater(NodeUpdater):
             inputs["H"] = height
 
 
+class WanImageToVideoUpdater(NodeUpdater):
+    """Update Wan image-to-video latent nodes (both WanImageToVideo and Wan22ImageToVideoLatent)."""
+    target_types = ("WanImageToVideo", "Wan22ImageToVideoLatent")
+
+    def update(self, node_data: Dict[str, Any], params: Dict[str, Any]) -> None:
+        width = params.get("width")
+        height = params.get("height")
+        frames = _merge_params(
+            params.get("frames"),
+            params.get("num_frames"),
+            params.get("frame_count"),
+            params.get("length"),
+        )
+        inputs = node_data.setdefault("inputs", {})
+        if width is not None and "width" in inputs:
+            inputs["width"] = width
+        if height is not None and "height" in inputs:
+            inputs["height"] = height
+        if frames is not None and "length" in inputs:
+            inputs["length"] = frames
+
+
 class LoadImageUpdater(NodeUpdater):
     target_types = ("LoadImage", "LoadImageForVideo", "ImageInput")
 
@@ -177,6 +199,7 @@ def default_updaters() -> Iterable[NodeUpdater]:
         KSamplerUpdater(),
         BasicSchedulerUpdater(),
         EmptyLatentImageUpdater(),
+        WanImageToVideoUpdater(),
         LoadImageUpdater(),
         HunyuanVideoSamplerUpdater(),
         GenericSeedUpdater(),
