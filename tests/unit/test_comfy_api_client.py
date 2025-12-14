@@ -83,6 +83,8 @@ def test_monitor_progress_success_flow_calls_callbacks(monkeypatch):
         json.dumps({"type": "executing", "data": {"node": "1"}}),
         json.dumps({"type": "executed", "data": {"node": "1"}}),
         json.dumps({"type": "execution_cached"}),
+        # Completion signal: executing with node=None and prompt_id matching
+        json.dumps({"type": "executing", "data": {"node": None, "prompt_id": "pid-success"}}),
     ])
 
     mock_ws = Mock()

@@ -11,6 +11,11 @@ def service(tmp_path):
     project_store = Mock()
     project_store.ensure_dir.side_effect = lambda project, *sub: str(tmp_path / "video")
     project_store.comfy_output_dir.return_value = str(tmp_path / "comfy")
+    # Add config mock with timeout settings
+    project_store.config = Mock()
+    project_store.config.get_video_initial_wait.return_value = 0
+    project_store.config.get_video_retry_delay.return_value = 0
+    project_store.config.get_video_max_retries.return_value = 1
     model_validator = Mock()
     state_store = Mock()
     return VideoGenerationService(project_store, model_validator, state_store)

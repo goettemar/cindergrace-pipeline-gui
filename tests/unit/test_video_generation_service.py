@@ -23,6 +23,13 @@ def project_store(tmp_path):
         return str(dest)
 
     store.ensure_dir.side_effect = ensure_dir
+
+    # Add config mock with timeout settings
+    store.config = Mock()
+    store.config.get_video_initial_wait.return_value = 0  # No wait in tests
+    store.config.get_video_retry_delay.return_value = 0  # No delay in tests
+    store.config.get_video_max_retries.return_value = 1  # Only 1 retry in tests
+
     return store
 
 
@@ -129,7 +136,7 @@ class TestHelperMethods:
             dest_dir=str(dest_dir),
         )
 
-        assert filename == "clip_name_1.mp4"
+        assert filename == "clip_name_2.mp4"  # Counter starts at 2 (original = 1)
 
     @pytest.mark.unit
     def test_propagate_chain_start_frame_sets_next_segment(self, service):

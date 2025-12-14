@@ -62,7 +62,7 @@ def test_video_generator_addon_init(monkeypatch):
 
     monkeypatch.setattr(vg, "ConfigManager", DummyConfig)
     monkeypatch.setattr(vg, "WorkflowRegistry", lambda: object())
-    monkeypatch.setattr(vg, "ModelValidator", lambda root: object())
+    monkeypatch.setattr(vg, "ModelValidator", lambda root: type("MV", (), {"enabled": True})())
     monkeypatch.setattr(vg, "ProjectStore", DummyProjectStore)
     monkeypatch.setattr(vg, "VideoGeneratorStateStore", lambda: object())
     monkeypatch.setattr(
@@ -168,6 +168,13 @@ def test_video_generator_render_minimal(monkeypatch):
         def get_comfy_url(self):
             return "http://localhost:8188"
 
+        @property
+        def config_dir(self):
+            return "/tmp/config"
+
+    class DummyModelValidator:
+        enabled = True
+
     class DummyStore:
         def __init__(self, cfg):
             self.cfg = cfg
@@ -195,7 +202,7 @@ def test_video_generator_render_minimal(monkeypatch):
             },
         )(),
     )
-    monkeypatch.setattr(vg, "ModelValidator", lambda root: object())
+    monkeypatch.setattr(vg, "ModelValidator", lambda root: DummyModelValidator())
     monkeypatch.setattr(vg, "ProjectStore", DummyStore)
     class DummyStateStore:
         def configure(self, *args, **kwargs):

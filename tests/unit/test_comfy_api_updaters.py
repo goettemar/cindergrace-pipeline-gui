@@ -8,6 +8,7 @@ from infrastructure.comfy_api.updaters import (
     KSamplerUpdater,
     BasicSchedulerUpdater,
     EmptyLatentImageUpdater,
+    WanImageToVideoUpdater,
     LoadImageUpdater,
     HunyuanVideoSamplerUpdater,
     GenericSeedUpdater,
@@ -584,7 +585,7 @@ class TestDefaultUpdaters:
         updaters = list(default_updaters())
 
         # Assert
-        assert len(updaters) == 10
+        assert len(updaters) == 11
         assert isinstance(updaters[0], CLIPTextEncodeUpdater)
         assert isinstance(updaters[1], SaveImageUpdater)
         assert isinstance(updaters[2], SaveVideoUpdater)
@@ -592,6 +593,7 @@ class TestDefaultUpdaters:
         assert isinstance(updaters[4], KSamplerUpdater)
         assert isinstance(updaters[5], BasicSchedulerUpdater)
         assert isinstance(updaters[6], EmptyLatentImageUpdater)
-        assert isinstance(updaters[7], LoadImageUpdater)
-        assert isinstance(updaters[8], HunyuanVideoSamplerUpdater)
-        assert isinstance(updaters[9], GenericSeedUpdater)
+        assert isinstance(updaters[7], WanImageToVideoUpdater)
+        assert isinstance(updaters[8], LoadImageUpdater)
+        assert isinstance(updaters[9], HunyuanVideoSamplerUpdater)
+        assert isinstance(updaters[10], GenericSeedUpdater)

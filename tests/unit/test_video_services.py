@@ -51,21 +51,22 @@ class TestLastFrameExtractorExtract:
     @patch('shutil.which')
     @patch('subprocess.run')
     @patch('os.path.exists')
-    def test_extract_success(self, mock_exists, mock_subprocess, mock_which, tmp_path):
-        """Should extract last frame successfully"""
+    @patch('os.path.getsize')
+    def test_extract_success(self, mock_getsize, mock_exists, mock_subprocess, mock_which, tmp_path):
+        """Should extract last frame successfully using frame-number method"""
         # Arrange
         cache_dir = tmp_path / "cache"
         extractor = LastFrameExtractor(str(cache_dir))
 
         mock_which.return_value = "/usr/bin/ffmpeg"
         mock_exists.side_effect = lambda path: True  # Video exists, output exists
+        mock_getsize.return_value = 12345  # File has size
 
-        # Mock successful subprocess
-        mock_subprocess.return_value = MagicMock(
-            returncode=0,
-            stdout="",
-            stderr=""
-        )
+        # Mock subprocess calls: first ffprobe (frame count), then ffmpeg (extraction)
+        mock_subprocess.side_effect = [
+            MagicMock(returncode=0, stdout="100\n", stderr=""),  # ffprobe returns 100 frames
+            MagicMock(returncode=0, stdout="", stderr=""),       # ffmpeg extraction succeeds
+        ]
 
         entry = {"plan_id": "001", "shot_id": "001"}
         video_path = "/path/to/video.mp4"
@@ -75,14 +76,19 @@ class TestLastFrameExtractorExtract:
 
         # Assert
         assert result == str(cache_dir / "001_lastframe.png")
-        mock_subprocess.assert_called_once()
+        assert mock_subprocess.call_count == 2
 
-        # Verify ffmpeg command
-        call_args = mock_subprocess.call_args[0][0]
-        assert "ffmpeg" in call_args
-        assert "-y" in call_args
-        assert "-sseof" in call_args
-        assert video_path in call_args
+        # Verify ffprobe command (first call)
+        ffprobe_args = mock_subprocess.call_args_list[0][0][0]
+        assert "ffprobe" in ffprobe_args
+        assert "-count_frames" in ffprobe_args
+
+        # Verify ffmpeg command (second call)
+        ffmpeg_args = mock_subprocess.call_args_list[1][0][0]
+        assert "ffmpeg" in ffmpeg_args
+        assert "-y" in ffmpeg_args
+        assert "select=eq(n\\,99)" in ffmpeg_args  # Last frame = 100-1 = 99
+        assert video_path in ffmpeg_args
 
     @pytest.mark.unit
     @patch('shutil.which')
@@ -156,7 +162,8 @@ class TestLastFrameExtractorExtract:
     @patch('shutil.which')
     @patch('subprocess.run')
     @patch('os.path.exists')
-    def test_extract_uses_shot_id_fallback(self, mock_exists, mock_subprocess, mock_which, tmp_path):
+    @patch('os.path.getsize')
+    def test_extract_uses_shot_id_fallback(self, mock_getsize, mock_exists, mock_subprocess, mock_which, tmp_path):
         """Should use shot_id if plan_id is missing"""
         # Arrange
         cache_dir = tmp_path / "cache"
@@ -164,8 +171,13 @@ class TestLastFrameExtractorExtract:
 
         mock_which.return_value = "/usr/bin/ffmpeg"
         mock_exists.return_value = True
+        mock_getsize.return_value = 12345
 
-        mock_subprocess.return_value = MagicMock(returncode=0)
+        # Mock subprocess calls: ffprobe then ffmpeg
+        mock_subprocess.side_effect = [
+            MagicMock(returncode=0, stdout="50\n", stderr=""),  # ffprobe
+            MagicMock(returncode=0, stdout="", stderr=""),      # ffmpeg
+        ]
 
         entry = {"shot_id": "002"}  # No plan_id
         video_path = "/path/to/video.mp4"
