@@ -7,7 +7,7 @@ import gradio as gr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.base_addon import BaseAddon
-from addons.components import create_folder_scanner, project_status_md, shorten_storyboard_path
+from addons.components import create_folder_scanner, format_project_status_extended, shorten_storyboard_path
 from infrastructure.config_manager import ConfigManager
 from infrastructure.workflow_registry import WorkflowRegistry, PREFIX_KEYFRAME, PREFIX_KEYFRAME_LORA
 from infrastructure.project_store import ProjectStore
@@ -59,11 +59,10 @@ class KeyframeGeneratorAddon(BaseAddon):
         initial_storyboard_json, initial_status = self.load_storyboard_from_config()
 
         with gr.Blocks() as interface:
-            # Unified header: Tab name left, project status right
-            project_status = gr.HTML(project_status_md(self.project_manager, "🎬 Keyframe Generator"))
-
-            # Storyboard info (auto-refresh from config)
-            storyboard_info = gr.Markdown(self._get_storyboard_info())
+            # Unified header with project, storyboard, and resolution info
+            project_status = gr.HTML(format_project_status_extended(
+                self.project_manager, self.config, "🎬 Keyframe Generator"
+            ))
 
             with gr.Row():
                 # Left Column: Setup & Controls (25%)
@@ -194,7 +193,7 @@ class KeyframeGeneratorAddon(BaseAddon):
             # Auto-refresh storyboard on tab load
             interface.load(
                 fn=self._on_tab_load,
-                outputs=[project_status, storyboard_info, status_text, workflow_dropdown, compatibility_warning]
+                outputs=[project_status, status_text, workflow_dropdown, compatibility_warning]
             )
 
         return interface
@@ -210,12 +209,13 @@ class KeyframeGeneratorAddon(BaseAddon):
         # NOTE: Removed auto-rescan to avoid performance issues with Gradio timers
         # Workflows are now cached - use Settings > Rescan Workflows if new files are added
 
-        # Project status
-        project_status = project_status_md(self.project_manager, "🎬 Keyframe Generator")
+        # Extended project status (includes storyboard & resolution)
+        project_status = format_project_status_extended(
+            self.project_manager, self.config, "🎬 Keyframe Generator"
+        )
 
         # Reload storyboard from config (picks up changes from Storyboard Editor)
         _, load_status = self.load_storyboard_from_config()
-        storyboard_info = self._get_storyboard_info()
 
         # Determine status based on load result
         if "Error" in load_status:
@@ -232,7 +232,7 @@ class KeyframeGeneratorAddon(BaseAddon):
         default_model = self._get_default_model(default_workflow)
         compatibility_update = self._check_character_model_compatibility(default_model)
 
-        return project_status, storyboard_info, status, workflow_update, compatibility_update
+        return project_status, status, workflow_update, compatibility_update
 
     @handle_errors("Failed to load storyboard", return_tuple=True)
     def _load_storyboard_model(self, storyboard_file: str) -> domain_models.Storyboard:
@@ -464,15 +464,6 @@ class KeyframeGeneratorAddon(BaseAddon):
         os.makedirs(output_dir, exist_ok=True)
         os.system(f'xdg-open "{output_dir}"')
         return f"**📁 Opened:** `{output_dir}`"
-
-    def _get_storyboard_info(self) -> str:
-        """Get storyboard info for display."""
-        self.config.refresh()
-        storyboard_file = self.config.get_current_storyboard()
-        if not storyboard_file or not os.path.exists(storyboard_file):
-            return "**Storyboard:** Not loaded"
-        filename = os.path.basename(storyboard_file)
-        return f"**Storyboard:** `{filename}`"
 
     def _get_available_workflows(self) -> List[str]:
         """Get available keyframe workflows (gcp_* prefix)."""

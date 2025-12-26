@@ -108,6 +108,29 @@ class KeyframeGenerationService:
             logger.warning(f"Copy failed for {variant_name}: {exc}")
             return []
 
+    def _download_runpod_outputs(self, prompt_id: str, output_dir: str) -> List[str]:
+        """Download outputs from RunPod ComfyUI to local output directory.
+
+        Args:
+            prompt_id: Job ID to download outputs for
+            output_dir: Local directory to save files
+
+        Returns:
+            List of downloaded file paths
+        """
+        try:
+            logger.info(f"Downloading RunPod outputs for job {prompt_id} to {output_dir}")
+            downloaded = self.api.download_job_outputs(prompt_id, output_dir)
+            if downloaded:
+                logger.info(f"Downloaded {len(downloaded)} file(s) from RunPod: {downloaded}")
+                return downloaded
+            else:
+                logger.warning("No files downloaded from RunPod")
+                return []
+        except Exception as e:
+            logger.error(f"Failed to download RunPod outputs: {e}", exc_info=True)
+            return []
+
     def run_generation(
         self,
         storyboard: Storyboard,
@@ -371,6 +394,12 @@ class KeyframeGenerationService:
             result = self.api.monitor_progress(prompt_id, timeout=300)
 
             if result["status"] == "success":
+                # RunPod: Download to comfy_output first (same as local)
+                if self.config.is_runpod_backend():
+                    comfy_output = self.project_store.comfy_output_dir()
+                    self._download_runpod_outputs(prompt_id, comfy_output)
+
+                # Same copy logic for both Local and RunPod
                 copied_images = self._copy_generated_images(
                     variant_name=variant_name,
                     output_dir=output_dir,

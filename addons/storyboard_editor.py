@@ -7,7 +7,7 @@ import gradio as gr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.base_addon import BaseAddon
-from addons.components import create_storyboard_preview, format_project_status
+from addons.components import create_storyboard_preview, format_project_status_extended
 from addons.shared_styles import inject_styles
 from addons.ui_factories import (
     create_universal_presets,
@@ -109,7 +109,7 @@ class StoryboardEditorAddon(BaseAddon):
         """Auto-load current storyboard on tab open and return initial UI data."""
         tab_name = "📝 Storyboard Editor"
         default_data = {
-            "storyboard_info": format_project_status(None, None, tab_name=tab_name),
+            "storyboard_info": format_project_status_extended(self.project_store, self.config, tab_name),
             "status": "",
             "shots": [],
             "timeline": "**Timeline:** 0 shots, 0.0s total"
@@ -118,7 +118,6 @@ class StoryboardEditorAddon(BaseAddon):
         try:
             project = self.project_store.get_active_project(refresh=True)
             if not project:
-                default_data["storyboard_info"] = format_project_status(None, None, tab_name=tab_name)
                 return default_data
 
             # Load the CURRENT storyboard (from SQLite via active project)
@@ -127,22 +126,24 @@ class StoryboardEditorAddon(BaseAddon):
                 self.current_storyboard = StoryboardService.load_from_file(current_sb_path)
                 shot_list = self._storyboard_to_dataframe()
                 current_sb_name = os.path.basename(current_sb_path)
-                default_data["storyboard_info"] = format_project_status(
-                    project.get("name"), project.get("slug"), tab_name=tab_name
+                default_data["storyboard_info"] = format_project_status_extended(
+                    self.project_store, self.config, tab_name
                 )
                 default_data["status"] = f"✅ {len(shot_list)} Shots loaded"
                 default_data["shots"] = shot_list
                 default_data["timeline"] = self._get_timeline_info()
                 logger.info(f"Auto-loaded current storyboard: {current_sb_name} with {len(shot_list)} shots")
             else:
-                default_data["storyboard_info"] = format_project_status(
-                    project.get("name"), project.get("slug"), tab_name=tab_name
+                default_data["storyboard_info"] = format_project_status_extended(
+                    self.project_store, self.config, tab_name
                 )
                 default_data["status"] = "⚠️ No storyboard selected – please select one in 📚 Storyboards"
 
         except Exception as e:
             logger.error(f"Error auto-loading storyboard: {e}", exc_info=True)
-            default_data["storyboard_info"] = format_project_status(None, None, tab_name=tab_name)
+            default_data["storyboard_info"] = format_project_status_extended(
+                self.project_store, self.config, tab_name
+            )
             default_data["status"] = f"❌ Error: {str(e)}"
 
         return default_data
@@ -287,10 +288,10 @@ class StoryboardEditorAddon(BaseAddon):
         with gr.Blocks() as interface:
             inject_styles()
 
-            # Build UI components
+            # Build UI components - header outside of Row for full width
+            storyboard_info = gr.HTML(initial_data["storyboard_info"])
             with gr.Row():
-                storyboard_info = gr.HTML(initial_data["storyboard_info"])
-                refresh_storyboard_btn = gr.Button("🔄 Refresh", size="sm", scale=0)
+                refresh_storyboard_btn = gr.Button("🔄 Refresh Storyboard", size="sm", variant="secondary")
 
             with gr.Row(equal_height=False):
                 left_components = self._render_left_pane(initial_data)

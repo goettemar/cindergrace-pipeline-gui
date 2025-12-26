@@ -38,28 +38,26 @@ class TestComfyFluxAddon(BaseAddon):
 
         with gr.Blocks() as interface:
             # Unified header: Tab name left, no project relation
-            gr.HTML(format_project_status(tab_name="🔌 ComfyUI Connection Test", no_project_relation=True))
+            gr.HTML(format_project_status(tab_name="🧪 ComfyUI Test Panel", no_project_relation=True))
 
-            gr.Markdown("Test your local ComfyUI installation and generate keyframe test images")
+            # Get backend info for display
+            backend = self.config.get_active_backend()
+            backend_name = backend.get("name", "Unknown")
+            backend_type = backend.get("type", "local")
+            backend_url = backend.get("url", "")
+            if backend_type == "runpod":
+                backend_display = f"🚀 {backend_name} (RunPod)"
+            else:
+                backend_display = f"🖥️ {backend_name} (Local)"
+
+            gr.Markdown(
+                f"Generate test images using the active backend: **{backend_display}**\n\n"
+                f"URL: `{backend_url}`\n\n"
+                "*Change backend in ⚙️ Settings tab*"
+            )
 
             # Progress Section (always visible)
             status_text = gr.Markdown("**Ready** - Click 'Generate Test Images' to start")
-
-            # Connection Section
-            with gr.Accordion("🔌 Connection Test", open=False):
-                with gr.Row():
-                    comfy_url = gr.Textbox(
-                        value=self.config.get_comfy_url(),
-                        label="ComfyUI URL (vom aktiven Backend)",
-                        placeholder="http://127.0.0.1:8188"
-                    )
-                    refresh_url_btn = gr.Button("🔄", variant="secondary", size="sm", min_width=50)
-                    test_conn_btn = gr.Button("🔌 Test Connection", variant="secondary")
-
-                connection_status = gr.Markdown("**Status:** 🔴 Not tested")
-
-                with gr.Accordion("System Info", open=False):
-                    system_info = gr.JSON(label="ComfyUI System Stats", value={})
 
             # Generation & Results Section (combined)
             with gr.Accordion("🎨 Keyframe Test Generation & Results", open=False):
@@ -120,20 +118,9 @@ class TestComfyFluxAddon(BaseAddon):
                     # download_btn = gr.Button("📦 Download All as ZIP")
 
             # Event Handlers
-            refresh_url_btn.click(
-                fn=lambda: self.config.get_comfy_url(),
-                outputs=[comfy_url]
-            )
-
-            test_conn_btn.click(
-                fn=self.test_connection,
-                inputs=[comfy_url],
-                outputs=[connection_status, system_info]
-            )
-
             generate_btn.click(
                 fn=self.generate_test_images,
-                inputs=[comfy_url, prompt, num_images, start_seed, workflow_dropdown],
+                inputs=[prompt, num_images, start_seed, workflow_dropdown],
                 outputs=[image_gallery, status_text]
             )
 
@@ -145,12 +132,6 @@ class TestComfyFluxAddon(BaseAddon):
             clear_btn.click(
                 fn=lambda: ([], "**Ready** - Gallery cleared"),
                 outputs=[image_gallery, status_text]
-            )
-
-            # Auto-refresh URL from active backend when tab loads
-            interface.load(
-                fn=lambda: self.config.get_comfy_url(),
-                outputs=[comfy_url]
             )
 
         return interface
@@ -187,7 +168,6 @@ class TestComfyFluxAddon(BaseAddon):
 
     def generate_test_images(
         self,
-        comfy_url: str,
         prompt: str,
         num_images: int,
         start_seed: int,
@@ -197,7 +177,6 @@ class TestComfyFluxAddon(BaseAddon):
         Generate keyframe test images using image generation workflow
 
         Args:
-            comfy_url: ComfyUI server URL
             prompt: Text prompt for generation
             num_images: Number of images to generate
             start_seed: Starting seed value
@@ -210,6 +189,9 @@ class TestComfyFluxAddon(BaseAddon):
             # Check if workflow file is selected
             if not workflow_file or workflow_file.startswith("No workflows"):
                 return [], f"**❌ Error:** No workflow selected. Please add your ComfyUI workflow JSON files to `config/workflow_templates/` and click 🔄 Refresh Workflows."
+
+            # Get URL from active backend config
+            comfy_url = self.config.get_comfy_url()
 
             # Initialize API
             if self.api is None or self.api.server_url != comfy_url:

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import gradio as gr
 
 from addons.base_addon import BaseAddon
-from addons.components import project_status_md
+from addons.components import format_project_status_extended, project_status_md
 from infrastructure.config_manager import ConfigManager
 from infrastructure.project_store import ProjectStore
 from infrastructure.logger import get_logger
@@ -39,7 +39,9 @@ class ImageImporterAddon(BaseAddon):
 
         with gr.Blocks() as interface:
             # Unified header: Tab name left, project status right
-            project_status = gr.HTML(project_status_md(self.project_manager, "📥 Image Importer"))
+            project_status = gr.HTML(format_project_status_extended(
+                self.project_manager, self.config, "📥 Image Importer"
+            ))
 
             gr.Markdown(
                 "Import existing images and automatically create a storyboard. "

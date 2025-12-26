@@ -31,14 +31,6 @@ class SettingsAddon(BaseAddon):
     def get_tab_name(self) -> str:
         return "⚙️ Settings"
 
-    def _get_backend_choices(self):
-        """Get list of backend choices for dropdown."""
-        backends = self.config.get_backends()
-        choices = []
-        for backend_id, backend in backends.items():
-            backend_type = "☁️" if backend.get("type") == "remote" else "🖥️"
-            choices.append((f"{backend_type} {backend.get('name', backend_id)}", backend_id))
-        return choices
 
     def render(self) -> gr.Blocks:
         with gr.Blocks() as interface:
@@ -48,82 +40,53 @@ class SettingsAddon(BaseAddon):
             # Backend Selection Section
             with gr.Group():
                 gr.Markdown("## 🔌 ComfyUI Backend")
-                gr.Markdown(
-                    "Choose between local ComfyUI and cloud backends (e.g. Google Colab). "
-                    "For Colab: Start the notebook and copy the Cloudflare URL here."
-                )
-
-                with gr.Row():
-                    backend_dropdown = gr.Dropdown(
-                        choices=self._get_backend_choices(),
-                        value=self.config.get_active_backend_id(),
-                        label="Active Backend",
-                        scale=2
-                    )
-                    switch_btn = gr.Button("🔄 Switch", variant="primary", scale=1)
-                    test_btn = gr.Button("🧪 Test", scale=1)
-
-                backend_status = gr.Markdown("")
 
                 # Current backend info
                 active = self.config.get_active_backend()
+                active_type = active.get("type", "local")
+                if active_type == "runpod":
+                    type_display = f"🚀 RunPod (Pod: {active.get('pod_id', 'unknown')})"
+                else:
+                    type_display = "🖥️ Local"
+
                 with gr.Row():
                     current_url = gr.Textbox(
                         value=active.get("url", ""),
                         label="Active URL",
-                        interactive=False
+                        interactive=False,
+                        scale=3
                     )
                     current_type = gr.Textbox(
-                        value="Cloud/Remote" if active.get("type") == "remote" else "Local",
+                        value=type_display,
                         label="Type",
                         interactive=False,
-                        scale=0
+                        scale=1
                     )
+                    test_btn = gr.Button("🧪 Test", scale=0)
 
-            # Add/Edit Backend Section
-            with gr.Accordion("➕ Add / Edit Backend", open=False):
+                backend_status = gr.Markdown("")
+
+            # RunPod Quick Connect
+            with gr.Accordion("🚀 RunPod Quick Connect", open=False):
                 gr.Markdown(
-                    "**Colab URL:** After starting the Colab notebook, a URL like "
-                    "`https://xxx-xxx.trycloudflare.com` will appear. Enter it here."
-                )
-
-                new_backend_name = gr.Textbox(
-                    label="Name",
-                    placeholder="e.g. Colab T4 GPU"
+                    "Enter your Pod-ID to connect to RunPod. "
+                    "URL: `https://{pod_id}-8188.proxy.runpod.net`\n\n"
+                    "*Pod-ID ändert sich bei jedem neuen Pod - daher kein Speichern nötig.*"
                 )
 
                 with gr.Row():
-                    new_backend_url = gr.Textbox(
-                        label="ComfyUI URL",
-                        placeholder="https://xxx.trycloudflare.com",
-                        scale=2
+                    runpod_id = gr.Textbox(
+                        label="Pod-ID",
+                        placeholder="abc123xyz",
+                        info="Found in RunPod dashboard URL",
+                        scale=3
                     )
-                    new_backend_type = gr.Radio(
-                        choices=[("🖥️ Local", "local"), ("☁️ Remote/Colab", "remote")],
-                        value="remote",
-                        label="Type"
-                    )
+                    activate_runpod_btn = gr.Button("🚀 Activate RunPod", variant="primary", scale=1)
+                    use_local_btn = gr.Button("🖥️ Use Local", variant="secondary", scale=1)
 
-                new_comfy_root = gr.Textbox(
-                    label="ComfyUI Path (only for local backends)",
-                    placeholder="/home/user/ComfyUI",
-                    visible=False
-                )
+                runpod_status = gr.Markdown("")
 
-                # Show/hide comfy_root based on type
-                new_backend_type.change(
-                    fn=lambda t: gr.update(visible=(t == "local")),
-                    inputs=[new_backend_type],
-                    outputs=[new_comfy_root]
-                )
-
-                with gr.Row():
-                    add_backend_btn = gr.Button("➕ Add", variant="primary")
-                    remove_backend_btn = gr.Button("🗑️ Remove Selected", variant="stop")
-
-                add_status = gr.Markdown("")
-
-            # Local Backend Settings (legacy compatibility)
+            # Local Backend Settings
             with gr.Accordion("🖥️ Edit Local Backend", open=False):
                 local_url = gr.Textbox(
                     value=self.config.get_backends().get("local", {}).get("url", "http://127.0.0.1:8188"),
@@ -246,28 +209,22 @@ class SettingsAddon(BaseAddon):
                 reset_status = gr.Markdown("")
 
             # Event handlers
-            switch_btn.click(
-                fn=self.switch_backend,
-                inputs=[backend_dropdown],
-                outputs=[backend_status, current_url, current_type]
-            )
-
             test_btn.click(
                 fn=self.test_connection,
                 inputs=[],
                 outputs=[backend_status]
             )
 
-            add_backend_btn.click(
-                fn=self.add_backend,
-                inputs=[new_backend_name, new_backend_url, new_backend_type, new_comfy_root],
-                outputs=[add_status, backend_dropdown]
+            activate_runpod_btn.click(
+                fn=self.activate_runpod,
+                inputs=[runpod_id],
+                outputs=[runpod_status, current_url, current_type]
             )
 
-            remove_backend_btn.click(
-                fn=self.remove_backend,
-                inputs=[backend_dropdown],
-                outputs=[add_status, backend_dropdown]
+            use_local_btn.click(
+                fn=self.use_local_backend,
+                inputs=[],
+                outputs=[runpod_status, current_url, current_type]
             )
 
             save_local_btn.click(
@@ -455,24 +412,44 @@ class SettingsAddon(BaseAddon):
             logger.error(f"Failed to save TTS API key: {e}")
             return f"❌ **Error:** {e}"
 
-    def switch_backend(self, backend_id: str):
-        """Switch to selected backend."""
+    def activate_runpod(self, pod_id: str):
+        """Activate RunPod backend with given Pod-ID."""
         try:
-            if self.config.set_active_backend(backend_id):
-                backend = self.config.get_active_backend()
-                url = backend.get("url", "")
-                backend_type = "Cloud/Remote" if backend.get("type") == "remote" else "Local"
-                logger.info(f"Switched to backend: {backend_id}")
-                return (
-                    f"**✅ Switched to:** {backend.get('name', backend_id)}",
-                    url,
-                    backend_type
-                )
-            else:
-                return ("**❌ Backend not found**", "", "")
+            if not pod_id or not pod_id.strip():
+                return ("**❌ Pod-ID required**", gr.update(), gr.update())
+
+            pod_id = pod_id.strip()
+            url = f"https://{pod_id}-8188.proxy.runpod.net"
+
+            # Set temporary RunPod backend
+            self.config.set_runpod_backend(pod_id, url)
+            logger.info(f"Activated RunPod backend: {pod_id}")
+
+            return (
+                f"**✅ RunPod activated**\n\nPod-ID: `{pod_id}`",
+                url,
+                f"🚀 RunPod (Pod: {pod_id})"
+            )
         except Exception as e:
-            logger.error(f"Failed to switch backend: {e}")
-            return (f"**❌ Error:** {e}", "", "")
+            logger.error(f"Failed to activate RunPod: {e}")
+            return (f"**❌ Error:** {e}", gr.update(), gr.update())
+
+    def use_local_backend(self):
+        """Switch back to local backend."""
+        try:
+            self.config.set_active_backend("local")
+            backend = self.config.get_active_backend()
+            url = backend.get("url", "http://127.0.0.1:8188")
+            logger.info("Switched to local backend")
+
+            return (
+                "**✅ Local backend activated**",
+                url,
+                "🖥️ Local"
+            )
+        except Exception as e:
+            logger.error(f"Failed to switch to local: {e}")
+            return (f"**❌ Error:** {e}", gr.update(), gr.update())
 
     def test_connection(self):
         """Test connection to active backend."""
@@ -493,61 +470,6 @@ class SettingsAddon(BaseAddon):
         except Exception as e:
             logger.error(f"Connection test failed: {e}")
             return f"**❌ Connection error:** {e}"
-
-    def add_backend(self, name: str, url: str, backend_type: str, comfy_root: str):
-        """Add a new backend configuration."""
-        try:
-            if not name or not name.strip():
-                return ("**❌ Name required**", gr.update())
-
-            if not url or not url.strip():
-                return ("**❌ URL required**", gr.update())
-
-            # Clean up inputs and auto-generate ID from name
-            name = name.strip()
-            backend_id = name.lower().replace(" ", "_").replace("-", "_")
-            # Remove special characters
-            backend_id = "".join(c for c in backend_id if c.isalnum() or c == "_")
-            url = url.strip()
-
-            # Validate URL format
-            if not url.startswith("http://") and not url.startswith("https://"):
-                url = "https://" + url
-
-            self.config.add_backend(
-                backend_id=backend_id,
-                name=name,
-                url=url,
-                backend_type=backend_type,
-                comfy_root=comfy_root if backend_type == "local" else ""
-            )
-
-            logger.info(f"Added backend: {backend_id} ({name})")
-            return (
-                f"**✅ Backend added:** {name}",
-                gr.update(choices=self._get_backend_choices())
-            )
-        except Exception as e:
-            logger.error(f"Failed to add backend: {e}")
-            return (f"**❌ Error:** {e}", gr.update())
-
-    def remove_backend(self, backend_id: str):
-        """Remove a backend configuration."""
-        try:
-            if backend_id == "local":
-                return ("**❌ Local backend cannot be removed**", gr.update())
-
-            if self.config.remove_backend(backend_id):
-                logger.info(f"Removed backend: {backend_id}")
-                return (
-                    f"**✅ Backend removed:** {backend_id}",
-                    gr.update(choices=self._get_backend_choices(), value="local")
-                )
-            else:
-                return ("**❌ Backend not found**", gr.update())
-        except Exception as e:
-            logger.error(f"Failed to remove backend: {e}")
-            return (f"**❌ Error:** {e}", gr.update())
 
     def save_local_backend(self, url: str, comfy_root: str):
         """Update local backend settings."""

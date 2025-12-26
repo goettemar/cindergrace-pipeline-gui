@@ -24,6 +24,7 @@ from addons.dataset_generator import DatasetGeneratorAddon
 from addons.character_trainer import CharacterTrainerAddon
 from addons.help_addon import HelpAddon
 from addons.tts_addon import TTSAddon
+from addons.update_addon import UpdateAddon
 from infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
@@ -58,6 +59,7 @@ AVAILABLE_ADDONS = [
 
     # === Settings & Help ===
     SettingsAddon,           # Configuration
+    UpdateAddon,             # Updates & Rollback
     HelpAddon,               # Help & workflow overview (rightmost)
 ]
 

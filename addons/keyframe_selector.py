@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.base_addon import BaseAddon
 from addons.components import (
+    format_project_status_extended,
     project_status_md,
     storyboard_status_md,
     create_storyboard_section,
@@ -91,7 +92,9 @@ class KeyframeSelectorAddon(BaseAddon):
 
         with gr.Blocks() as interface:
             # Unified header: Tab name left, project status right
-            project_status = gr.HTML(project_status_md(self.project_manager, "✅ Keyframe Selector"))
+            project_status = gr.HTML(format_project_status_extended(
+                self.project_manager, self.config, "✅ Keyframe Selector"
+            ))
 
             gr.Markdown(
                 "Load a storyboard, review all generated keyframe variants "

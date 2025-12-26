@@ -551,11 +551,193 @@ class ComfyUIAPI:
             "type": image_type
         }
         url = f"{self.server_url}/view?" + urllib.parse.urlencode(params)
-        headers = {'User-Agent': 'CINDERGRACE/1.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CINDERGRACE/1.0'}
         request = urllib.request.Request(url, headers=headers)
 
         with urllib.request.urlopen(request) as response:
             return response.read()
+
+    def download_file(
+        self,
+        filename: str,
+        local_path: str,
+        subfolder: str = "",
+        file_type: str = "output"
+    ) -> bool:
+        """
+        Download a file from ComfyUI to a local path.
+
+        Used for RunPod integration to download outputs to local machine.
+
+        Args:
+            filename: Remote filename
+            local_path: Local path to save file
+            subfolder: Subfolder on ComfyUI server
+            file_type: File type (output, input, temp)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            data = self._get_image(filename, subfolder, file_type)
+
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+
+            with open(local_path, 'wb') as f:
+                f.write(data)
+
+            logger.debug(f"✓ Downloaded: {filename} -> {local_path}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to download {filename}: {e}")
+            return False
+
+    def download_job_outputs(
+        self,
+        prompt_id: str,
+        local_dir: str,
+        retries: int = 5,
+        delay: float = 1.0
+    ) -> List[str]:
+        """
+        Download all output files from a completed job to a local directory.
+
+        Used for RunPod integration: after job completes on RunPod,
+        this downloads all outputs (images, videos) to the local machine.
+
+        Args:
+            prompt_id: Job ID
+            local_dir: Local directory to save files
+            retries: Number of retries if history is missing
+            delay: Delay between retries
+
+        Returns:
+            List of local file paths for downloaded files
+        """
+        try:
+            # Get job history
+            history = None
+            attempt = 0
+            while attempt <= retries:
+                history = self.get_history(prompt_id)
+                if history:
+                    break
+                if attempt < retries:
+                    time.sleep(delay)
+                attempt += 1
+
+            if not history:
+                logger.warning(f"No history found for prompt_id: {prompt_id}")
+                return []
+
+            downloaded_files = []
+            os.makedirs(local_dir, exist_ok=True)
+
+            # Process outputs from history
+            for node_id, node_output in history.get("outputs", {}).items():
+                # Handle images
+                if "images" in node_output:
+                    for image_info in node_output["images"]:
+                        filename = image_info["filename"]
+                        subfolder = image_info.get("subfolder", "")
+                        file_type = image_info.get("type", "output")
+
+                        local_path = os.path.join(local_dir, filename)
+                        if self.download_file(filename, local_path, subfolder, file_type):
+                            downloaded_files.append(local_path)
+
+                # Handle videos (gifs)
+                if "gifs" in node_output:
+                    for gif_info in node_output["gifs"]:
+                        filename = gif_info["filename"]
+                        subfolder = gif_info.get("subfolder", "")
+                        file_type = gif_info.get("type", "output")
+
+                        local_path = os.path.join(local_dir, filename)
+                        if self.download_file(filename, local_path, subfolder, file_type):
+                            downloaded_files.append(local_path)
+
+            logger.info(f"Downloaded {len(downloaded_files)} file(s) from job {prompt_id}")
+            return downloaded_files
+
+        except Exception as e:
+            logger.error(f"Failed to download job outputs: {e}", exc_info=True)
+            return []
+
+    def upload_image(self, local_path: str, subfolder: str = "") -> Optional[str]:
+        """
+        Upload an image to ComfyUI input folder.
+
+        Used for RunPod integration: upload local keyframe to remote ComfyUI
+        before starting a workflow that uses it.
+
+        Args:
+            local_path: Local path to image file
+            subfolder: Optional subfolder in ComfyUI input directory
+
+        Returns:
+            Remote filename if successful, None otherwise
+        """
+        try:
+            if not os.path.exists(local_path):
+                logger.error(f"File not found: {local_path}")
+                return None
+
+            filename = os.path.basename(local_path)
+
+            # Read file content
+            with open(local_path, 'rb') as f:
+                file_data = f.read()
+
+            # Prepare multipart form data
+            boundary = '----WebKitFormBoundary' + str(uuid.uuid4()).replace('-', '')
+
+            body = []
+            # File field
+            body.append(f'--{boundary}'.encode())
+            body.append(f'Content-Disposition: form-data; name="image"; filename="{filename}"'.encode())
+            body.append(b'Content-Type: application/octet-stream')
+            body.append(b'')
+            body.append(file_data)
+
+            # Subfolder field (if specified)
+            if subfolder:
+                body.append(f'--{boundary}'.encode())
+                body.append(b'Content-Disposition: form-data; name="subfolder"')
+                body.append(b'')
+                body.append(subfolder.encode())
+
+            # Overwrite field
+            body.append(f'--{boundary}'.encode())
+            body.append(b'Content-Disposition: form-data; name="overwrite"')
+            body.append(b'')
+            body.append(b'true')
+
+            body.append(f'--{boundary}--'.encode())
+            body.append(b'')
+
+            body_bytes = b'\r\n'.join(body)
+
+            # Make request
+            url = f"{self.server_url}/upload/image"
+            headers = {
+                'Content-Type': f'multipart/form-data; boundary={boundary}',
+                'User-Agent': 'CINDERGRACE/1.0',
+            }
+
+            request = urllib.request.Request(url, data=body_bytes, headers=headers, method='POST')
+
+            with urllib.request.urlopen(request, timeout=60) as response:
+                result = json.loads(response.read())
+                remote_filename = result.get("name", filename)
+                logger.info(f"✓ Uploaded: {local_path} -> {remote_filename}")
+                return remote_filename
+
+        except Exception as e:
+            logger.error(f"Failed to upload {local_path}: {e}", exc_info=True)
+            return None
 
     def _get_request(self, endpoint: str) -> Dict[str, Any]:
         """
@@ -572,7 +754,7 @@ class ComfyUIAPI:
         """
         url = f"{self.server_url}{endpoint}"
         headers = {
-            'User-Agent': 'CINDERGRACE/1.0',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CINDERGRACE/1.0',
             'Accept': 'application/json',
         }
         request = urllib.request.Request(url, headers=headers)
@@ -602,7 +784,10 @@ class ComfyUIAPI:
         url = f"{self.server_url}{endpoint}"
 
         payload = json.dumps(data).encode('utf-8')
-        headers = {'Content-Type': 'application/json'}
+        headers = {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 CINDERGRACE/1.0',
+        }
 
         request = urllib.request.Request(url, data=payload, headers=headers, method='POST')
 

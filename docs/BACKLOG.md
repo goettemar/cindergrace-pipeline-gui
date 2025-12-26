@@ -19,7 +19,10 @@
 | Refactoring Carryover | 3 | Low: 3 |
 | Google Colab | 1 | Medium: 1 |
 | Workflow Templates | 1 | Medium: 1 |
-| **Total** | **31** | **High: 2, Medium: 14, Low: 15** |
+| Test Panel Enhancements | 2 | Low: 2 |
+| RunPod Integration | 1 | Low: 1 |
+| UI Improvements | 1 | Low: 1 |
+| **Total** | **35** | **High: 2, Medium: 14, Low: 19** |
 
 ---
 
@@ -978,6 +981,7 @@
 - #024: Pre-commit Hooks
 - #025: Branch Protection
 - #028: Gallery Caption Position (Keyframe Selector)
+- #034: Extended Project Status Bar auf allen Tabs
 
 **v0.8.0:**
 - #003: Live Progress Updates
@@ -988,6 +992,8 @@
 - #014: Caching Layer
 - #027: ComfyAPI Strategy Refinement
 - #029: Google Colab Integration
+- #031: OpenRouter End-to-End Test
+- #032: TTS End-to-End Test
 
 **v0.9.0:**
 - #005: Windows File Locking
@@ -996,6 +1002,7 @@
 - #020: Architecture Diagrams
 - #026: SegmentManager Extraction
 - #030: User Workflow Templates Setup & Documentation
+- #033: Remote/Colab Backend Typ entfernen
 
 **v1.0.0:**
 - #015: Health Check Endpoint
@@ -1131,6 +1138,79 @@ config/workflow_templates_user/
 
 ---
 
+## 🧪 Test Panel Enhancements
+
+### #031: OpenRouter End-to-End Test
+**Status:** Open
+**Priority:** Low
+**Impact:** Testing, Debugging
+**Assigned Version:** v0.8.0
+
+**Description:**
+Add OpenRouter API connection test to the Test Panel. Currently there's no easy way to verify OpenRouter integration is working.
+
+**Proposed Solution:**
+- Add "OpenRouter Test" section in Test Panel
+- Test API connectivity with simple completion request
+- Show model list if successful
+- Display error details if failed
+
+**Related Files:**
+- `addons/test_comfy_flux.py` (or new test panel)
+- `infrastructure/openrouter_client.py`
+
+---
+
+### #032: TTS End-to-End Test
+**Status:** Open
+**Priority:** Low
+**Impact:** Testing, Debugging
+**Assigned Version:** v0.8.0
+
+**Description:**
+Add TTS (Text-to-Speech) service test to the Test Panel. Useful for debugging audio generation issues.
+
+**Proposed Solution:**
+- Add "TTS Test" section in Test Panel
+- Test with short sample text
+- Play back generated audio
+- Show error details if failed
+
+**Related Files:**
+- `addons/test_comfy_flux.py` (or new test panel)
+- `services/tts_service.py`
+
+---
+
+### #033: Remote/Colab Backend Typ entfernen
+**Status:** Open
+**Priority:** Low
+**Impact:** Code Cleanup, UX
+**Assigned Version:** v0.9.0
+
+**Description:**
+Der "Remote/Colab" Backend-Typ funktioniert nicht sauber und verwirrt Benutzer. Die Colab-Integration (#029) ist ohnehin deferred. Stattdessen wird RunPod als dedizierter Cloud-Backend-Typ implementiert.
+
+**Current Status:**
+- Remote-Typ in Settings Panel vorhanden aber nicht funktional
+- Cloudflare Tunnel instabil
+- RunPod-Integration wird als Ersatz implementiert
+
+**Proposed Solution:**
+- Remote-Typ aus UI entfernen (nur Local und RunPod)
+- Bestehende Remote-Backends beim Upgrade zu "local" migrieren
+- Code-Cleanup: `is_remote_backend()` und zugehörige Logik entfernen
+
+**Related Files:**
+- `addons/settings_panel.py`
+- `infrastructure/config_manager.py`
+- `infrastructure/settings_store.py`
+
+**Notes:**
+Siehe auch #029 (Google Colab Integration) - wird später ggf. reaktiviert.
+
+---
+
 ## 📝 Notes
 
 ### Issue Lifecycle
@@ -1171,6 +1251,42 @@ Review schedule:
 
 ---
 
-**Last Review:** December 13, 2025
+---
+
+## 🎨 UI Improvements
+
+### #034: Extended Project Status Bar auf allen Tabs
+**Status:** Partial
+**Priority:** Low
+**Impact:** UI Consistency
+**Assigned Version:** v0.7.0
+
+**Description:**
+Die erweiterte Projekt-Statusleiste (`format_project_status_extended`) zeigt Projekt, Storyboard und Auflösung in einem einheitlichen Header-Bar an. Diese wurde für die Haupttabs (Project bis Video) implementiert, aber nicht alle Tabs nutzen sie konsequent.
+
+**Current Status:**
+- ✅ project_panel.py - Header in render()
+- ✅ storyboard_manager.py - Header in render()
+- ✅ storyboard_editor.py - Header in render() (+ half-width fix)
+- ✅ storyboard_llm_generator.py - Header in render()
+- ✅ image_importer.py - Header in render()
+- ✅ keyframe_selector.py - Header in render()
+- ✅ video_generator.py - Header in render()
+- ⏳ Callback-Methoden nutzen noch `project_status_md` statt extended
+- ❌ Weitere Tabs (TTS, Help, etc.) nutzen alten Style
+
+**Proposed Solution:**
+1. Alle `_on_tab_load()` Methoden auf `format_project_status_extended` umstellen
+2. Callback-Methoden in storyboard_manager.py anpassen
+3. Weitere Tabs (tts_addon.py etc.) ebenfalls umstellen
+4. Konsistenz-Check über alle Addons
+
+**Related Files:**
+- `addons/components/project_status_bar.py`
+- Alle Addon-Dateien mit `project_status_md` Aufrufen
+
+---
+
+**Last Review:** December 26, 2025
 **Next Review:** After v0.6.0 Release
 **Maintained By:** Architecture Team

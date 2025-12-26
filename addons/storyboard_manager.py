@@ -8,6 +8,7 @@ from addons.components import (
     create_delete_confirm,
     create_folder_scanner,
     create_storyboard_preview,
+    format_project_status_extended,
     project_status_md,
 )
 from infrastructure.config_manager import ConfigManager
@@ -39,7 +40,9 @@ class StoryboardManagerAddon(BaseAddon):
     def render(self) -> gr.Blocks:
         with gr.Blocks() as interface:
             # Unified header: Tab name left, project status right
-            project_status = gr.HTML(project_status_md(self.project_store, "📚 Storyboards"))
+            project_status = gr.HTML(format_project_status_extended(
+                self.project_store, self.config, "📚 Storyboards"
+            ))
 
             gr.Markdown("Create, load and manage storyboards for the active project.")
 

@@ -12,6 +12,7 @@ from addons.components import (
     create_delete_confirm,
     create_status_log,
     append_status,
+    format_project_status_extended,
     project_status_md,
     create_resolution_guide,
 )
@@ -46,7 +47,9 @@ class ProjectAddon(BaseAddon):
 
         with gr.Blocks() as interface:
             # Unified header: Tab name left, project status right
-            project_status = gr.HTML(project_status_md(self.project_manager, "📁 Project Manager"))
+            project_status = gr.HTML(format_project_status_extended(
+                self.project_manager, self.config, "📁 Project Manager"
+            ))
 
             gr.Markdown(
                 "Create or load a project. "

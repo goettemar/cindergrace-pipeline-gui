@@ -177,6 +177,11 @@ class VideoGenerationService:
             width = int(entry.get("width", 1024))
             height = int(entry.get("height", 576))
 
+        # Handle start frame - upload to RunPod if needed
+        start_frame_path = entry.get("start_frame")
+        if start_frame_path and self.project_store.config.is_runpod_backend():
+            start_frame_path = self._upload_start_frame_to_runpod(comfy_api, start_frame_path)
+
         updated_workflow = self._apply_video_params(
             comfy_api=comfy_api,
             workflow=workflow,
@@ -184,7 +189,7 @@ class VideoGenerationService:
             width=width,
             height=height,
             filename_prefix=entry.get("clip_name", entry.get("shot_id", "clip")),
-            start_frame_path=entry.get("start_frame"),
+            start_frame_path=start_frame_path,
             fps=fps,
             frames=frames,
             wan_motion=entry.get("wan_motion"),
@@ -197,6 +202,10 @@ class VideoGenerationService:
 
         if result["status"] != "success":
             raise RuntimeError(result.get("error", "ComfyUI-Job fehlgeschlagen"))
+
+        # RunPod integration: Download outputs from remote ComfyUI
+        if self.project_store.config.is_runpod_backend():
+            self._download_runpod_outputs(comfy_api, prompt_id)
 
         video_paths = self._copy_video_outputs(entry, project)
 
@@ -211,6 +220,54 @@ class VideoGenerationService:
             last_frame_path = extractor.extract(video_paths[-1])
 
         return video_paths, last_frame_path
+
+    def _download_runpod_outputs(self, comfy_api: ComfyUIAPI, prompt_id: str) -> None:
+        """Download outputs from RunPod ComfyUI to local output directory.
+
+        Args:
+            comfy_api: ComfyUI API client
+            prompt_id: Job ID to download outputs for
+        """
+        try:
+            local_output_dir = self.project_store.comfy_output_dir()
+            logger.info(f"Downloading RunPod outputs for job {prompt_id} to {local_output_dir}")
+            downloaded = comfy_api.download_job_outputs(prompt_id, local_output_dir)
+            if downloaded:
+                logger.info(f"Downloaded {len(downloaded)} file(s) from RunPod")
+            else:
+                logger.warning("No files downloaded from RunPod")
+        except Exception as e:
+            logger.error(f"Failed to download RunPod outputs: {e}", exc_info=True)
+
+    def _upload_start_frame_to_runpod(
+        self, comfy_api: ComfyUIAPI, local_path: str
+    ) -> Optional[str]:
+        """Upload a start frame image to RunPod ComfyUI.
+
+        Args:
+            comfy_api: ComfyUI API client
+            local_path: Local path to the image file
+
+        Returns:
+            Remote filename if successful, original path otherwise
+        """
+        try:
+            if not os.path.exists(local_path):
+                logger.warning(f"Start frame not found: {local_path}")
+                return local_path
+
+            logger.info(f"Uploading start frame to RunPod: {local_path}")
+            remote_filename = comfy_api.upload_image(local_path)
+
+            if remote_filename:
+                logger.info(f"Start frame uploaded: {remote_filename}")
+                return remote_filename
+            else:
+                logger.warning("Failed to upload start frame, using local path")
+                return local_path
+        except Exception as e:
+            logger.error(f"Failed to upload start frame: {e}", exc_info=True)
+            return local_path
 
     def _apply_video_params(
         self,

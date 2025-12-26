@@ -279,15 +279,31 @@ class ConfigManager:
         return True
 
     def add_backend(self, backend_id: str, name: str, url: str,
-                    backend_type: str = "remote", comfy_root: str = "") -> None:
-        """Add a new backend configuration."""
+                    backend_type: str = "local", comfy_root: str = "",
+                    pod_id: str = "") -> None:
+        """Add a new backend configuration.
+
+        Args:
+            backend_id: Unique identifier for the backend
+            name: Display name
+            url: ComfyUI URL (auto-constructed for RunPod)
+            backend_type: "local" or "runpod"
+            comfy_root: ComfyUI installation path (local only)
+            pod_id: RunPod Pod-ID (runpod only)
+        """
         backends = self.get_backends()
-        backends[backend_id] = {
+        backend_config = {
             "name": name,
             "url": url,
             "type": backend_type,
-            "comfy_root": comfy_root if backend_type == "local" else ""
         }
+
+        if backend_type == "local":
+            backend_config["comfy_root"] = comfy_root
+        elif backend_type == "runpod":
+            backend_config["pod_id"] = pod_id
+
+        backends[backend_id] = backend_config
         self._store.set_backends(backends)
 
     def remove_backend(self, backend_id: str) -> bool:
@@ -324,9 +340,52 @@ class ConfigManager:
         return True
 
     def is_remote_backend(self) -> bool:
-        """Check if the current backend is remote (Colab/Cloud)."""
+        """Check if the current backend is remote (Cloud/RunPod).
+
+        Returns True for both legacy 'remote' type and new 'runpod' type.
+        """
         backend = self.get_active_backend()
-        return backend.get("type", "local") == "remote"
+        backend_type = backend.get("type", "local")
+        return backend_type in ("remote", "runpod")
+
+    def is_runpod_backend(self) -> bool:
+        """Check if the current backend is a RunPod instance."""
+        backend = self.get_active_backend()
+        return backend.get("type", "local") == "runpod"
+
+    def get_runpod_pod_id(self) -> str:
+        """Get the Pod-ID for the active RunPod backend.
+
+        Returns:
+            Pod-ID string or empty string if not a RunPod backend
+        """
+        backend = self.get_active_backend()
+        if backend.get("type") != "runpod":
+            return ""
+        return backend.get("pod_id", "")
+
+    def set_runpod_backend(self, pod_id: str, url: str) -> None:
+        """Set temporary RunPod backend as active.
+
+        RunPod backends are not permanently stored - they're just
+        temporary session backends since Pod-IDs change frequently.
+
+        Args:
+            pod_id: RunPod Pod-ID
+            url: Full ComfyUI URL (auto-constructed)
+        """
+        backends = self.get_backends()
+
+        # Add/update temporary runpod backend
+        backends["runpod"] = {
+            "name": "RunPod",
+            "url": url,
+            "type": "runpod",
+            "pod_id": pod_id,
+        }
+
+        self._store.set_backends(backends)
+        self._store.set_active_backend_id("runpod")
 
     # === API Keys (encrypted via SettingsStore) ===
 

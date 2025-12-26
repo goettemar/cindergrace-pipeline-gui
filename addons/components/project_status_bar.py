@@ -220,6 +220,77 @@ def project_status_md(project_store, tab_name: str, **kwargs) -> str:
     )
 
 
+def format_project_status_extended(
+    project_store,
+    config,
+    tab_name: str,
+    show_storyboard: bool = True,
+    show_resolution: bool = True,
+    show_path: bool = False,
+) -> str:
+    """Build extended project status with storyboard, resolution, and path.
+
+    This is the recommended function for tabs that work with projects.
+    It automatically collects all relevant project info.
+
+    Args:
+        project_store: ProjectStore instance
+        config: ConfigManager instance (for resolution)
+        tab_name: Tab label incl. emoji (e.g., "🎥 Video Generator")
+        show_storyboard: Include current storyboard name
+        show_resolution: Include resolution (e.g., "1280x720")
+        show_path: Include project path
+
+    Returns:
+        HTML string with extended project info
+
+    Example:
+        >>> format_project_status_extended(project_store, config, "🎬 Keyframes")
+        # Shows: "✅ Project: my_project │ 📖 main.json │ 📐 1280x720"
+    """
+    project = project_store.get_active_project(refresh=True) if project_store else None
+
+    if not project:
+        return format_project_status(None, None, tab_name=tab_name)
+
+    extra_info = []
+
+    # Add storyboard info
+    if show_storyboard:
+        storyboard_path = project.get("current_storyboard")
+        if storyboard_path:
+            short_name = shorten_storyboard_path(storyboard_path)
+            extra_info.append(("📖", short_name))
+        else:
+            extra_info.append(("📖", "none"))
+
+    # Add resolution
+    if show_resolution and config:
+        try:
+            width, height = config.get_resolution_tuple()
+            extra_info.append(("📐", f"{width}x{height}"))
+        except Exception:
+            pass
+
+    # Add path (shortened)
+    if show_path:
+        project_path = project.get("path", "")
+        if project_path:
+            # Show only last 2 directories
+            parts = project_path.rstrip("/").split("/")
+            short_path = "/".join(parts[-2:]) if len(parts) > 2 else project_path
+            extra_info.append(("📁", short_path))
+
+    return format_project_status(
+        project_name=project.get("name"),
+        project_slug=project.get("slug"),
+        tab_name=tab_name,
+        extra_info=extra_info if extra_info else None,
+        show_path=False,  # We handle path in extra_info
+        project_path=project.get("path"),
+    )
+
+
 def shorten_storyboard_path(abs_path: Optional[str]) -> str:
     """Shorten storyboard path for UI display."""
     if not abs_path:

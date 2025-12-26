@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 import gradio as gr
 
 from addons.base_addon import BaseAddon
-from addons.components import format_project_status_from_dict
+from addons.components import format_project_status_extended
 from addons.components.storyboard_draft_editor import (
     create_draft_editor,
     validate_draft_json,
@@ -68,10 +68,8 @@ class StoryboardLLMGeneratorAddon(BaseAddon):
 
     def _get_project_header(self) -> str:
         """Get project header HTML."""
-        project = self.project_store.get_active_project(refresh=True)
-        return format_project_status_from_dict(
-            project=project,
-            tab_name="🤖 AI Storyboard Generator",
+        return format_project_status_extended(
+            self.project_store, self.config, "🤖 AI Storyboard Generator"
         )
 
     def render(self) -> gr.Blocks:

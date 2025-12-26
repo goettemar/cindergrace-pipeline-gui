@@ -564,6 +564,97 @@ Successfully Implemented:
 
 ---
 
+## 🔄 Geplant: Integrierter Updater (v0.7.x)
+
+**One-Click Updates direkt aus der GUI:**
+
+```
+┌─────────────────────────────────────────┐
+│ 🔄 Updates                              │
+├─────────────────────────────────────────┤
+│ Aktuelle Version: v0.6.0                │
+│ Verfügbar: v0.6.1 ✨                    │
+│                                         │
+│ Änderungen:                             │
+│ • RunPod Integration                    │
+│ • Extended Status Bar                   │
+│ • Bugfixes...                           │
+│                                         │
+│ [📥 Update]  [↩️ Rollback auf v0.5.9]   │
+└─────────────────────────────────────────┘
+```
+
+**Features:**
+- ✅ **Version Check** – Prüft GitHub Releases auf neue Versionen
+- ✅ **Changelog Anzeige** – Release Notes direkt in der GUI
+- ✅ **One-Click Update** – Download und Installation ohne Terminal
+- ✅ **Rollback** – Zurück zur vorherigen Version bei Problemen
+- ✅ **Schlanke Backups** – Nur Source-Code (~5-10MB), .venv wird wiederverwendet
+
+**Backup-Strategie:**
+```
+~/.cindergrace/backups/
+  v0.5.9_source.tar.gz  (8MB)
+  v0.6.0_source.tar.gz  (8MB)
+```
+
+---
+
+## 🌐 Geplant: Community Workflow Repository (v0.8.x)
+
+**Öffentliches Repository für ComfyUI Workflows:**
+
+Ein zentraler Ort, an dem die Community Workflow-Templates für CINDERGRACE teilen kann – von Consumer-GPU-freundlichen Configs bis zu High-End RunPod Workflows.
+
+**Repository-Struktur:**
+```
+cindergrace-workflows/  (Public GitHub)
+├── workflows/
+│   ├── keyframes/
+│   │   ├── flux_dev_fp8/
+│   │   │   ├── workflow.json
+│   │   │   ├── metadata.yaml
+│   │   │   └── preview.png
+│   │   └── sdxl_turbo/
+│   └── video/
+│       ├── wan_2.2_14b_gguf/
+│       └── hunyuan_video/
+├── CONTRIBUTING.md
+└── SECURITY.md
+```
+
+**Metadata pro Workflow:**
+```yaml
+name: "Wan 2.2 14B GGUF"
+author: "github_username"
+min_vram_gb: 12
+tested_on: ["RTX 4090", "A4500", "RunPod A100"]
+required_models:
+  - "wan2.2_14B_Q4.gguf"
+```
+
+**Integration in GUI:**
+```
+┌─────────────────────────────────────────┐
+│ 🌐 Community Workflows                  │
+├─────────────────────────────────────────┤
+│ ⭐ wan_2.2_14b_gguf     │ 12GB VRAM    │
+│    von @user123         │ [Installieren]│
+│                                         │
+│ ⭐ hunyuan_video_pro    │ 48GB VRAM 🚀 │
+│    von @runpod_user     │ [Installieren]│
+│    "Nur RunPod/A100"                    │
+└─────────────────────────────────────────┘
+```
+
+**Sicherheit:**
+- PR-Only Workflow (kein direkter Push)
+- Automatische JSON-Validierung via GitHub Actions
+- Checksum-Verifizierung beim Download
+- Node-Whitelist gegen bösartige Workflows
+
+---
+
 ---
 
 ## 🔧 Developer Notes
