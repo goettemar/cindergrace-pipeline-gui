@@ -1,15 +1,22 @@
 import os
 import sys
 import json
-import shutil
 from copy import deepcopy
 from typing import Dict, Any, List, Tuple, Optional
 import gradio as gr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.base_addon import BaseAddon
+from addons.components import (
+    create_folder_scanner,
+    project_status_md,
+    storyboard_status_md,
+    create_storyboard_section,
+)
+from addons.helpers.storyboard_loader import load_storyboard_from_config
+from addons.helpers.plan_formatter import format_plan_summary, format_plan_shot
 from infrastructure.config_manager import ConfigManager
-from infrastructure.workflow_registry import WorkflowRegistry
+from infrastructure.workflow_registry import WorkflowRegistry, PREFIX_VIDEO
 from infrastructure.model_validator import ModelValidator
 from infrastructure.state_store import VideoGeneratorStateStore
 from infrastructure.project_store import ProjectStore
@@ -23,6 +30,7 @@ from services.video.video_generation_service import VideoGenerationService
 from services.video.video_plan_builder import VideoPlanBuilder
 
 logger = get_logger(__name__)
+
 NO_PLAN_TEXT = "Noch kein Plan berechnet."
 NO_SHOT_TEXT = "Kein Shot ausgewählt."
 
@@ -34,7 +42,11 @@ class VideoGeneratorAddon(BaseAddon):
         self.project_manager = ProjectStore(self.config)
         self.state_store = VideoGeneratorStateStore()
         self.model_validator = ModelValidator(self.config.get_comfy_root())
-        self.plan_builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        if hasattr(self.model_validator, "rebuild_index"):
+            self.model_validator.rebuild_index()  # Build index immediately at startup
+        model_count = len(getattr(self.model_validator, "_index", {}) or {})
+        logger.info(f"Video Generator: ModelValidator initialized with {model_count} models")
+        self.plan_builder = VideoPlanBuilder()  # Uses defaults: 73 frames, 24 fps
         self.video_service = VideoGenerationService(self.project_manager, self.model_validator, self.state_store, self.plan_builder)
         self.storyboard_model: Optional[domain_models.Storyboard] = None
         self.selection_model: Optional[domain_models.SelectionSet] = None
@@ -69,6 +81,15 @@ class VideoGeneratorAddon(BaseAddon):
     def get_tab_name(self) -> str:
         return "🎥 Video Generator"
 
+    def _project_status_md(self) -> str:
+        project = self.project_manager.get_active_project(refresh=True)
+        if not project:
+            return "Kein aktives Projekt"
+        name = project.get("name", "Unbekannt")
+        slug = project.get("slug", "unbekannt")
+        path = project.get("path", "")
+        return f"Projekt: {name} ({slug}) – {path}"
+
     def _auto_load_storyboard_and_selection(self) -> Dict[str, Any]:
         """Auto-load storyboard and selection during render() - returns initial UI data."""
         defaults = {
@@ -87,20 +108,16 @@ class VideoGeneratorAddon(BaseAddon):
 
         try:
             self.config.refresh()
-            storyboard_file = self.config.get_current_storyboard()
-            if not storyboard_file:
+            storyboard_model, status_md, storyboard_raw = load_storyboard_from_config(self.config, apply_resolution=True)
+            if not storyboard_model:
                 logger.debug("Video Generator: No storyboard configured for auto-load")
-                return defaults
-
-            storyboard_model, error = self._load_storyboard_model(storyboard_file)
-            if error or not storyboard_model:
-                logger.warning(f"Video Generator: Could not auto-load storyboard: {error}")
+                defaults["storyboard_status"] = status_md
                 return defaults
 
             self.storyboard_model = storyboard_model
-            defaults["storyboard_status"] = f"**Storyboard:** ✅ {storyboard_model.project} – {len(storyboard_model.shots)} Shots geladen"
-            defaults["storyboard_info"] = json.dumps(storyboard_model.raw, indent=2)
-            defaults["storyboard_state"] = storyboard_model.raw
+            defaults["storyboard_status"] = status_md
+            defaults["storyboard_info"] = json.dumps(storyboard_raw, indent=2)
+            defaults["storyboard_state"] = storyboard_raw
 
             # Try to auto-load selection
             project = self.project_manager.get_active_project(refresh=True)
@@ -149,7 +166,8 @@ class VideoGeneratorAddon(BaseAddon):
         selection_choices = self._get_available_selection_files()
         default_selection = saved.get("selection_file") if saved.get("selection_file") in selection_choices else self._get_default_selection_file()
         workflow_choices = self._get_available_workflows()
-        default_workflow = saved.get("workflow_file") if saved.get("workflow_file") in workflow_choices else self._get_default_workflow()
+        # Always use registry default - it reflects the user's "Set as Default" choice
+        default_workflow = self._get_default_workflow()
 
         # Merge saved state with auto-loaded data (auto-load takes precedence for fresh data)
         stored_plan = auto_loaded["plan_state"] if auto_loaded["plan_state"] else saved.get("plan_state", [])
@@ -181,8 +199,10 @@ class VideoGeneratorAddon(BaseAddon):
         preview_path = preview_path if preview_path and os.path.exists(str(preview_path)) else None
 
         with gr.Blocks() as interface:
-            gr.Markdown("# 🎥 Wan 2.2 Video Generator - Phase 3 (Beta)")
-            gr.Markdown("Nutze deine ausgewählten Keyframes aus Phase 2. Shots über 3 Sekunden werden segmentiert, LastFrames werden durchgereicht.")
+            # Unified header: Tab name left, project status right
+            project_status = gr.HTML(project_status_md(self.project_manager, "🎥 Video Generator"))
+
+            gr.Markdown("Nutze deine ausgewählten Keyframes um Videos zu generieren. Für längere Videos den **Long Video GGUF** Workflow wählen.")
 
             # Warning if ModelValidator is disabled
             if not self.model_validator.enabled:
@@ -194,64 +214,88 @@ class VideoGeneratorAddon(BaseAddon):
                     elem_classes=["warning-banner"]
                 )
 
+            storyboard_section = create_storyboard_section(
+                accordion_title="📁 Storyboard",
+                info_md_value=storyboard_status_md(self.project_manager, default_storyboard, "🎥 Video Generator"),
+                reload_label="📖 Storyboard neu laden",
+                reload_variant="secondary",
+                reload_size="sm",
+            )
+            storyboard_md = storyboard_section.info_md
+            load_storyboard_btn = storyboard_section.reload_btn
+            storyboard_status = gr.Markdown(storyboard_status_default)
+            selection_status = gr.Markdown(selection_status_default)
+
+            # === 2-Column Layout ===
+            with gr.Row():
+                # Left Column (50%): Workflow, Generation Plan, Generate Button
+                with gr.Column(scale=1):
+                    with gr.Group():
+                        gr.Markdown("## ⚙️ Workflow")
+                        # Workflow scanner with action buttons
+                        workflow_scanner = create_folder_scanner(
+                            label="Video-Workflow",
+                            choices=workflow_choices,
+                            value=default_workflow,
+                            info="Video-Workflow (gcv_*)",
+                            show_refresh=False,
+                            action_buttons=[
+                                ("⭐ Set as Default", "secondary", "sm"),
+                                ("🔄 Scan", "secondary", "sm"),
+                            ]
+                        )
+                        workflow_dropdown = workflow_scanner.dropdown
+                        set_default_btn = workflow_scanner.action_btns[0]
+                        rescan_btn = workflow_scanner.action_btns[1]
+                        workflow_status = gr.Markdown("")
+                        with gr.Row():
+                            fps_slider = gr.Slider(minimum=12, maximum=30, step=1, value=24, label="Frames pro Sekunde", info="Standard 24 fps")
+                            clip_duration_box = gr.Number(
+                                value=self.max_clip_duration,
+                                label="Clip-Länge (Sek.)",
+                                precision=1,
+                                minimum=0.5,
+                                maximum=30.0,
+                                interactive=False,
+                                info="Segment duration (fixed) 0.5-30s"
+                            )
+
+                    with gr.Group():
+                        gr.Markdown("## 🗂️ Generation Plan")
+                        plan_summary = gr.Markdown(summary_text)
+
+                    with gr.Group():
+                        generate_btn = gr.Button("▶️ Clips generieren", variant="primary", size="lg")
+
+                        # Confirmation dialog (initially hidden)
+                        with gr.Group(visible=False) as confirm_group:
+                            confirm_summary = gr.Markdown("### ⚠️ Generierung bestätigen")
+                            with gr.Row():
+                                confirm_btn = gr.Button("✅ Bestätigen & Starten", variant="primary")
+                                cancel_btn = gr.Button("❌ Abbrechen", variant="secondary")
+
+                        open_video_btn = gr.Button("📁 Ausgabeordner öffnen", variant="secondary")
+                        reload_storyboard_btn = gr.Button("🔄 Storyboard neu laden", variant="secondary")
+                        revalidate_models_btn = gr.Button("🔍 Modelle neu verifizieren", variant="secondary")
+                        model_status = gr.Markdown("")
+
+                # Right Column (50%): Shot Preview
+                with gr.Column(scale=1):
+                    with gr.Group():
+                        gr.Markdown("## 🎬 Shot Preview")
+                        plan_shot_dropdown = gr.Dropdown(choices=shot_choices, value=selected_shot if selected_shot in shot_choices else (shot_choices[0] if shot_choices else None), label="Shot auswählen", interactive=True)
+                        shot_preview_info = gr.Markdown(shot_md)
+                        startframe_preview = gr.Image(label="Startframe Vorschau", type="filepath", interactive=False, value=preview_path)
+
+            # === Status Section (below columns) ===
             with gr.Group():
-                gr.Markdown("## 🗂️ Projekt")
-                project_status = gr.Markdown(self._project_status_md())
-                refresh_project_btn = gr.Button("🔄 Projektstatus aktualisieren", size="sm")
-
-            with gr.Accordion("📁 Storyboard & Auswahl", open=False):
-                storyboard_md = gr.Markdown(self._current_storyboard_md(default_storyboard))
-                load_storyboard_btn = gr.Button("📖 Storyboard neu laden", variant="secondary", size="sm")
-                storyboard_status = gr.Markdown(storyboard_status_default)
-                selection_status = gr.Markdown(selection_status_default)
-                storyboard_info = gr.Code(label="Storyboard-Details", language="json", value=storyboard_info_default, lines=12, max_lines=20, interactive=False)
-
-            with gr.Group():
-                gr.Markdown("## ⚙️ Workflow")
-                with gr.Row():
-                    workflow_dropdown = gr.Dropdown(choices=workflow_choices, value=default_workflow, label="Video-Workflow", info="Wan 2.2 Workflow (konfigurierbar über ⚙️ Settings)")
-                    refresh_workflow_btn = gr.Button("🔄", size="sm")
-                with gr.Row():
-                    fps_slider = gr.Slider(minimum=12, maximum=30, step=1, value=24, label="Frames pro Sekunde", info="Standard 24 fps")
-                    clip_duration_box = gr.Number(
-                        value=self.max_clip_duration,
-                        label="Clip-Länge (Sek.)",
-                        precision=1,
-                        minimum=0.5,
-                        maximum=30.0,
-                        interactive=False,
-                        info="Segment duration (fixed) 0.5-30s"
-                    )
-                gr.Markdown("**Hinweis:** Jeder Clip dauert **3 Sekunden**. Segmentierung inkl. LastFrame→StartFrame-Kette.")
-
-            with gr.Group():
-                gr.Markdown("## 🗂️ Generation Plan")
-                plan_summary = gr.Markdown(summary_text)
-                plan_shot_dropdown = gr.Dropdown(choices=shot_choices, value=selected_shot if selected_shot in shot_choices else (shot_choices[0] if shot_choices else None), label="Shot auswählen (Preview/Debug)", interactive=True)
-                shot_preview_info = gr.Markdown(shot_md)
-                startframe_preview = gr.Image(label="Startframe Vorschau", type="filepath", interactive=False, value=preview_path)
-
-            with gr.Group():
-                gr.Markdown("## 🚀 Clip-Generierung")
-                with gr.Row():
-                    generate_btn = gr.Button("▶️ Clips generieren", variant="primary", size="lg")
-                    open_video_btn = gr.Button("📁 Ausgabeordner öffnen", variant="secondary")
-                    reset_btn = gr.Button("♻️ Zurücksetzen", variant="secondary")
-
-                # Confirmation dialog (initially hidden)
-                with gr.Group(visible=False) as confirm_group:
-                    confirm_summary = gr.Markdown("### ⚠️ Generierung bestätigen")
-                    with gr.Row():
-                        confirm_btn = gr.Button("✅ Bestätigen & Starten", variant="primary")
-                        cancel_btn = gr.Button("❌ Abbrechen", variant="secondary")
-
                 status_text = gr.Markdown(status_text_default)
                 progress_details = gr.Markdown(progress_text_default)
                 last_video = gr.Video(label="Letzter Clip", value=last_video_path, visible=True)
 
-            refresh_project_btn.click(fn=self._refresh_project_status, outputs=[project_status])
-            load_storyboard_btn.click(fn=self.load_storyboard_and_selection, outputs=[storyboard_status, storyboard_info, storyboard_state, selection_status, selection_state, plan_summary, plan_shot_dropdown, plan_state, shot_preview_info, startframe_preview])
-            refresh_workflow_btn.click(fn=lambda: gr.update(choices=self._get_available_workflows(), value=self._get_default_workflow()), outputs=[workflow_dropdown])
+            load_storyboard_btn.click(fn=self._reload_storyboard_ui, outputs=[storyboard_md, storyboard_status, storyboard_state, selection_status, selection_state, plan_summary, plan_shot_dropdown, plan_state, shot_preview_info, startframe_preview])
+            rescan_btn.click(fn=self._rescan_workflows, outputs=[workflow_dropdown, workflow_status])
+            set_default_btn.click(fn=self._set_default_workflow, inputs=[workflow_dropdown], outputs=[workflow_status])
             plan_shot_dropdown.change(fn=self.on_plan_shot_change, inputs=[plan_state, plan_shot_dropdown], outputs=[shot_preview_info, startframe_preview])
 
             # Two-step generation: first show confirmation, then execute
@@ -270,12 +314,88 @@ class VideoGeneratorAddon(BaseAddon):
                 outputs=[confirm_group, status_text]
             )
 
-            reset_btn.click(fn=self.reset_state, outputs=[selection_status, selection_state, plan_summary, plan_shot_dropdown, plan_state, shot_preview_info, startframe_preview, status_text, progress_details, last_video])
             open_video_btn.click(fn=self.open_video_folder, inputs=[storyboard_state], outputs=[status_text])
+            reload_storyboard_btn.click(fn=self._reload_storyboard_ui, outputs=[storyboard_md, storyboard_status, storyboard_state, selection_status, selection_state, plan_summary, plan_shot_dropdown, plan_state, shot_preview_info, startframe_preview])
+            revalidate_models_btn.click(fn=self.revalidate_models, outputs=[model_status])
 
-            # Note: Auto-load is now done synchronously during render() via _auto_load_storyboard_and_selection()
-            # The interface.load() event only fires on full page load, not on tab switch
+            # Auto-refresh storyboard and selection on tab load
+            interface.load(
+                fn=self._on_tab_load,
+                outputs=[
+                    storyboard_md,
+                    storyboard_status,
+                    storyboard_state,
+                    selection_status,
+                    selection_state,
+                    plan_summary,
+                    plan_shot_dropdown,
+                    plan_state,
+                    shot_preview_info,
+                    startframe_preview,
+                    project_status,
+                    workflow_dropdown,
+                ],
+            )
+
         return interface
+
+    def _on_tab_load(self):
+        """Called when tab loads - refresh storyboard and selection from config."""
+        # Reload storyboard and selection (picks up changes from Storyboard Editor)
+        result = self._reload_storyboard_ui()
+        # result is: (storyboard_md, storyboard_status, storyboard_state, selection_status, selection_state, plan_summary, plan_shot_dropdown, plan_state, shot_md, preview)
+
+        project_status = project_status_md(self.project_manager, "🎥 Video Generator")
+
+        # Get current default workflow to preserve it on tab refresh
+        default_workflow = self._get_default_workflow()
+        workflow_update = gr.update(value=default_workflow)
+
+        # Return all outputs in correct order
+        return (
+            result[0],          # storyboard_md
+            result[1],          # storyboard_status
+            result[2],          # storyboard_state
+            result[3],          # selection_status
+            result[4],          # selection_state
+            result[5],          # plan_summary
+            result[6],          # plan_shot_dropdown
+            result[7],          # plan_state
+            result[8],          # shot_preview_info
+            result[9],          # startframe_preview
+            project_status,     # project_status
+            workflow_update,    # workflow_dropdown
+        )
+
+    def _reload_storyboard_ui(self):
+        """Reload storyboard and return markdown info instead of JSON."""
+        result = self.load_storyboard_and_selection()
+        # Original returns: (storyboard_status, storyboard_info, storyboard_state, selection_status, selection_state, plan_summary, plan_shot_dropdown, plan_state, shot_md, preview)
+        # Replace storyboard_info (JSON) with storyboard_md
+        storyboard_md = storyboard_status_md(self.project_manager, self.config.get_current_storyboard(), "🎥 Video Generator")
+        return (
+            storyboard_md,      # storyboard_md (instead of position 0)
+            result[0],          # storyboard_status
+            result[2],          # storyboard_state (skip result[1] which was storyboard_info)
+            result[3],          # selection_status
+            result[4],          # selection_state
+            result[5],          # plan_summary
+            result[6],          # plan_shot_dropdown
+            result[7],          # plan_state
+            result[8],          # shot_preview_info
+            result[9],          # startframe_preview
+        )
+
+    def revalidate_models(self) -> str:
+        """Rebuild model index and return status message."""
+        count = self.model_validator.rebuild_index()
+        if count > 0:
+            return f"✅ **{count} Modelle** im Index gefunden."
+        elif not self.model_validator.enabled:
+            return "⚠️ Model-Validierung deaktiviert. ComfyUI-Pfad prüfen."
+        else:
+            return "⚠️ Keine Modelle gefunden. ComfyUI-Pfad prüfen."
+
     def load_storyboard_and_selection(self) -> Tuple[str, str, Dict[str, Any], str, Dict[str, Any], str, gr.Dropdown, List[Dict[str, Any]], str, str]:
         """Load storyboard from config and automatically load selection if available."""
         logger.info("Video Generator: Auto-loading storyboard and selection...")
@@ -341,7 +461,7 @@ class VideoGeneratorAddon(BaseAddon):
         plan_entries, summary, dropdown_choices, first_shot = self._build_plan_from_models()
         selection_status = f"**Auswahl:** ✅ {selection_file} – {len(selection_model.selections)} Shots"
         dropdown = gr.update(choices=dropdown_choices, value=first_shot) if plan_entries else gr.update(choices=[], value=None)
-        shot_md, preview = self._format_plan_shot(plan_entries, first_shot) if plan_entries else (NO_SHOT_TEXT, None)
+        shot_md, preview = format_plan_shot(plan_entries, first_shot) if plan_entries else (NO_SHOT_TEXT, None)
         self._persist_state(selection_file=selection_file, selection_state=selection_model.raw, selection_status=selection_status, plan_state=plan_entries, plan_summary=summary, selected_shot=first_shot)
         return selection_status, selection_model.raw, summary, dropdown, plan_entries, shot_md, preview
 
@@ -349,7 +469,7 @@ class VideoGeneratorAddon(BaseAddon):
         if not self.storyboard_model or not self.selection_model:
             return [], NO_PLAN_TEXT, [], None
         plan_entries = self.plan_builder.build(self.storyboard_model, self.selection_model).to_dict_list()
-        summary = self._format_plan_summary(plan_entries) if plan_entries else NO_PLAN_TEXT
+        summary = format_plan_summary(plan_entries) if plan_entries else NO_PLAN_TEXT
         dropdown_choices = [entry.get("plan_id") or entry.get("shot_id") for entry in plan_entries if entry.get("plan_id") or entry.get("shot_id")]
         dropdown_choices = [choice for choice in dropdown_choices if choice]
         first_choice = dropdown_choices[0] if dropdown_choices else None
@@ -361,12 +481,12 @@ class VideoGeneratorAddon(BaseAddon):
         choices = [entry.get("plan_id") or entry.get("shot_id") for entry in plan if entry.get("plan_id") or entry.get("shot_id")]
         choices = [shot for shot in choices if shot]
         default_shot = selected_shot if selected_shot in choices else (choices[0] if choices else None)
-        summary = self._format_plan_summary(plan)
-        shot_md, preview = self._format_plan_shot(plan, default_shot) if default_shot else (NO_SHOT_TEXT, None)
+        summary = format_plan_summary(plan)
+        shot_md, preview = format_plan_shot(plan, default_shot) if default_shot else (NO_SHOT_TEXT, None)
         return summary, choices, default_shot, shot_md, preview
 
     def on_plan_shot_change(self, plan_state: List[Dict[str, Any]], shot_id: str) -> Tuple[str, str]:
-        info, preview = ("Kein Shot ausgewählt.", None) if (not plan_state or not shot_id) else self._format_plan_shot(plan_state, shot_id)
+        info, preview = ("Kein Shot ausgewählt.", None) if (not plan_state or not shot_id) else format_plan_shot(plan_state, shot_id)
         if shot_id:
             self._persist_state(selected_shot=shot_id)
         return info, preview
@@ -458,69 +578,20 @@ Bitte überprüfe die Einstellungen vor dem Start:
         workflow_template, workflow_error = self._load_workflow_template(comfy_api, workflow_path)
         if workflow_error:
             return self._error_response(f"**Status:** ❌ {workflow_error}", "Keine Daten", plan_state)
+
         missing_models = self.model_validator.find_missing(workflow_template) if self.model_validator else []
         if missing_models: return self._error_response(f"**Status:** ❌ Modelle fehlen ({len(missing_models)})", self._format_missing_models(missing_models), plan_state)
-        preflight_notice = "⚠️ ffmpeg nicht gefunden – LastFrame-Kette wird übersprungen\n\n" if shutil.which("ffmpeg") is None else ""
         log_hint = "💡 **Tipp:** Für Echtzeit-Fortschritt siehe `logs/pipeline.log` und ComfyUI Terminal.\n\n"
         updated_plan, logs, last_video_path = self.video_service.run_generation(plan_state=plan_state, workflow_template=workflow_template, fps=validated_inputs.fps, project=project, comfy_api=comfy_api)
-        progress_md = log_hint + preflight_notice + "### Fortschritt\n" + "\n".join(logs)
-        summary = self._format_plan_summary(updated_plan)
+        progress_md = log_hint + "### Fortschritt\n" + "\n".join(logs)
+        summary = format_plan_summary(updated_plan)
         status = "**Status:** ✅ Clips generiert (siehe Log)" if last_video_path else "**Status:** ⚠️ Siehe Log für Details"
         self._persist_state(plan_state=updated_plan, plan_summary=summary, status_text=status, progress_md=progress_md, last_video=last_video_path, workflow_file=workflow_file)
         return status, progress_md, summary, updated_plan, last_video_path
 
-    def _format_plan_summary(self, plan: List[Dict[str, Any]]) -> str:
-        total = len(plan)
-        unique_shots = len({entry.get("shot_id") for entry in plan})
-        ready = len([entry for entry in plan if entry.get("ready")])
-        completed = len([entry for entry in plan if entry.get("status") == "completed"])
-        missing_list = sorted({entry["shot_id"] for entry in plan if entry.get("start_frame_source") == "missing"})
-        clamped_total = len({entry["shot_id"] for entry in plan if entry.get("segment_total", 1) > 1})
-        waiting_segments = len([entry for entry in plan if entry.get("start_frame_source") == "chain_wait"])
-        md = [
-            "### Plan-Übersicht",
-            f"- **Storyboard-Shots:** {unique_shots}",
-            f"- **Clips (Segmente):** {total}",
-            f"- **Bereit:** {ready}",
-            f"- **Abgeschlossen:** {completed}",
-            f"- **Segmentiert:** {clamped_total}",
-            f"- **Wartet auf LastFrame-Start:** {waiting_segments}",
-            f"- **Mit Startframe-Problemen:** {len(missing_list)}",
-        ]
-        return "\n".join(md + ([f"- ❗ Fehlende Shots: {', '.join(missing_list)}"] if missing_list else []))
-
     def _format_missing_models(self, missing: List[str]) -> str:
         items = "\n".join([f"  - `{name}`" for name in missing])
         return "### Fehlende Modelle\n- Die folgenden Dateien wurden im Workflow referenziert, aber nicht in deinem ComfyUI/models/ Ordner gefunden:\n" + items + "\n\nBitte installiere die Modelle oder passe den Workflow über ⚙️ Settings an."
-
-    def _format_plan_shot(self, plan: List[Dict[str, Any]], plan_entry_id: str) -> Tuple[str, str]:
-        entry = next((item for item in plan if (item.get("plan_id") or item.get("shot_id")) == plan_entry_id), None)
-        if not entry:
-            return "Shot nicht gefunden.", None
-        lines = [
-            f"### Shot {entry['shot_id']} – {entry['filename_base']}",
-            f"- **Prompt:** {entry['prompt'][:160]}{'…' if len(entry['prompt']) > 160 else ''}",
-            f"- **Auflösung:** {entry['width']}×{entry['height']}",
-            f"- **Storyboard-Dauer:** {entry['duration']}s",
-            f"- **Generierte Dauer:** {entry['effective_duration']}s",
-            f"- **Segment:** {entry.get('segment_index', 1)}/{entry.get('segment_total', 1)} (Ziel: {entry.get('segment_requested_duration', entry.get('effective_duration'))}s)",
-            f"- **Variante:** {entry.get('selected_file', 'n/a')}",
-            f"- **Status:** {entry.get('status', 'pending')}",
-        ]
-        motion = entry.get("wan_motion")
-        if motion:
-            motion_desc = motion.get("notes") or motion.get("type")
-            lines.append(f"- **Wan Motion:** {motion.get('type', 'n/a')} (Strength {motion.get('strength', '-')})")
-            if motion_desc and motion_desc != motion.get("type"):
-                lines.append(f"  - {motion_desc}")
-        if entry.get("segment_total", 1) > 1 and entry.get("segment_index", 1) == 1:
-            lines.append("- 🔁 Dieser Shot wird segmentiert.")
-        if entry.get("start_frame_source") == "chain_wait":
-            lines.append("- ⏳ Wartet auf LastFrame als Startframe.")
-        elif not entry.get("ready"):
-            lines.append("- ❌ Kein gültiger Startframe gefunden.")
-        preview_path = entry.get("start_frame") if entry.get("ready") else None
-        return "\n".join(lines), preview_path
 
     def open_video_folder(self, storyboard_state: Dict[str, Any]) -> str:
         project_data = self.project_manager.get_active_project(refresh=True)
@@ -545,11 +616,36 @@ Bitte überprüfe die Einstellungen vor dem Start:
         return files[0] if files else None
 
     def _get_available_workflows(self) -> List[str]:
-        workflows = self.workflow_registry.get_files(category="wan")
-        return workflows if workflows else []
+        """Get available video workflows (gcv_* prefix)."""
+        workflows = self.workflow_registry.get_files(PREFIX_VIDEO)
+        return workflows if workflows else ["No gcv_* workflows found"]
 
     def _get_default_workflow(self) -> str:
-        return self.workflow_registry.get_default(category="wan")
+        """Get default video workflow from SQLite."""
+        return self.workflow_registry.get_default(PREFIX_VIDEO)
+
+    def _set_default_workflow(self, workflow_file: str) -> str:
+        """Set selected workflow as default for video generation."""
+        if not workflow_file or workflow_file.startswith("No "):
+            return "**⚠️ Kein Workflow ausgewählt**"
+
+        success = self.workflow_registry.set_default(PREFIX_VIDEO, workflow_file)
+        if success:
+            display_name = self.workflow_registry.get_display_name(workflow_file)
+            logger.info(f"Set default video workflow: {workflow_file}")
+            return f"**✅ Default gesetzt:** {display_name}"
+        else:
+            return "**❌ Fehler beim Setzen des Defaults**"
+
+    def _rescan_workflows(self):
+        """Rescan filesystem for workflows and update cache."""
+        count, _ = self.workflow_registry.rescan(PREFIX_VIDEO)
+
+        workflows = self._get_available_workflows()
+        default = self._get_default_workflow()
+
+        status = f"**✅ Scan abgeschlossen:** {count} Video Workflows"
+        return gr.update(choices=workflows, value=default), status
 
     def _persist_state(self, **kwargs):
         if self.state_store:
@@ -559,20 +655,14 @@ Bitte überprüfe die Einstellungen vor dem Start:
         state_path = os.path.join(project["path"], "video", "_state.json") if project else None
         self.state_store.configure(state_path)
 
-    def _project_status_md(self) -> str:
-        project = self.project_manager.get_active_project(refresh=True)
-        if not project:
-            return "**❌ Kein aktives Projekt:** Bitte im Tab `📁 Projekt` anlegen oder auswählen."
-        return f"**Aktives Projekt:** {project.get('name')} (`{project.get('slug')}`)\n- Pfad: `{project.get('path')}`"
-
     def _refresh_project_status(self) -> str:
         project = self.project_manager.get_active_project(refresh=True)
         self._configure_state_store(project)
-        return self._project_status_md()
+        return project_status_md(self.project_manager, "🎥 Video Generator")
 
     def _error_response(self, status_message: str, progress_message: str, plan_state: List[Dict[str, Any]]):
-        summary = self._format_plan_summary(plan_state) if plan_state else NO_PLAN_TEXT
-        self._persist_state(status_text=status_message, progress_md=progress_message)
+        summary = format_plan_summary(plan_state) if plan_state else NO_PLAN_TEXT
+        # Don't persist error messages - they should not survive page refresh
         return status_message, progress_message, summary, plan_state, None
 
     def reset_state(self) -> Tuple[str, Dict[str, Any], str, gr.Dropdown, List[Dict[str, Any]], str, str, str, str, None]:
@@ -601,9 +691,5 @@ Bitte überprüfe die Einstellungen vor dem Start:
             "Noch keine Generierung gestartet.\n\n💡 **Tipp:** Während der Generierung siehe `logs/pipeline.log` und ComfyUI Terminal für Echtzeit-Fortschritt.",  # progress_details
             None  # last_video
         )
-
-    def _current_storyboard_md(self, storyboard: Optional[str]) -> str:
-        return "**❌ Kein Storyboard gesetzt:** Bitte im Tab `📁 Projekt` auswählen." if not storyboard else f"**Storyboard:** `{storyboard}` (aus Tab 📁 Projektverwaltung)"
-
 
 __all__ = ["VideoGeneratorAddon"]

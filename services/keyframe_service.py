@@ -1,8 +1,5 @@
 """Service layer for keyframe generation (Phase 1)."""
 import os
-import glob
-import shutil
-import json
 from datetime import datetime
 from typing import Dict, Any, List, Tuple, Generator, Optional
 
@@ -12,6 +9,18 @@ from infrastructure.config_manager import ConfigManager
 from infrastructure.comfy_api import ComfyUIAPI
 from infrastructure.logger import get_logger
 from domain.models import Storyboard
+from services.character_lora_service import CharacterLoraService
+
+# Import from keyframe package
+from services.keyframe import (
+    KeyframeFileHandler,
+    CheckpointHandler,
+    LoraParamsResolver,
+    create_checkpoint,
+    format_progress,
+    inject_model_override,
+    get_workflow_for_shot,
+)
 
 logger = get_logger(__name__)
 
@@ -36,17 +45,12 @@ class KeyframeService:
         variants_per_shot: int,
         base_seed: int
     ) -> Dict[str, Any]:
-        return {
-            "storyboard_file": storyboard.raw.get("storyboard_file"),
-            "workflow_file": workflow_file,
-            "variants_per_shot": int(variants_per_shot),
-            "base_seed": int(base_seed),
-            "started_at": datetime.now().isoformat(),
-            "completed_shots": [],
-            "current_shot": None,
-            "total_images_generated": 0,
-            "status": "running",
-        }
+        return create_checkpoint(
+            storyboard_file=storyboard.raw.get("storyboard_file"),
+            workflow_file=workflow_file,
+            variants_per_shot=variants_per_shot,
+            base_seed=base_seed
+        )
 
 
 class KeyframeGenerationService:
@@ -61,19 +65,46 @@ class KeyframeGenerationService:
         project_store: ProjectStore,
         comfy_api: Optional[ComfyUIAPI] = None
     ):
-        """
-        Initialize the keyframe generation service.
-
-        Args:
-            config: Configuration manager
-            project_store: Project path management
-            comfy_api: Optional ComfyUI API instance
-        """
+        """Initialize the keyframe generation service."""
         self.config = config
         self.project_store = project_store
         self.api = comfy_api
         self.is_running = False
         self.stop_requested = False
+
+        # Initialize handlers
+        self.character_lora_service = CharacterLoraService(config)
+        self._file_handler = KeyframeFileHandler(project_store)
+        self._checkpoint_handler = CheckpointHandler(project_store)
+        self._lora_resolver = LoraParamsResolver(self.character_lora_service)
+
+    def _format_progress(self, checkpoint: Dict[str, Any], total_shots: int) -> str:
+        """Backward-compatible wrapper for progress formatting."""
+        return format_progress(checkpoint, total_shots)
+
+    def _save_checkpoint(self, checkpoint: Dict[str, Any], storyboard_file: str, project: Dict[str, Any]) -> None:
+        """Backward-compatible wrapper for checkpoint persistence."""
+        try:
+            self._checkpoint_handler.save(checkpoint, storyboard_file, project)
+        except Exception as exc:
+            logger.warning(f"Failed to save checkpoint: {exc}")
+
+    def _copy_generated_images(
+        self,
+        variant_name: str,
+        output_dir: str,
+        api_result: Dict[str, Any],
+    ) -> List[str]:
+        """Backward-compatible wrapper for image copying."""
+        try:
+            return self._file_handler.copy_generated_images(
+                variant_name=variant_name,
+                output_dir=output_dir,
+                api_result=api_result,
+            )
+        except Exception as exc:
+            logger.warning(f"Copy failed for {variant_name}: {exc}")
+            return []
 
     def run_generation(
         self,
@@ -82,22 +113,10 @@ class KeyframeGenerationService:
         checkpoint: Dict[str, Any],
         project: Dict[str, Any],
         comfy_url: str,
-        progress_callback=None
+        progress_callback=None,
+        model_override: Optional[str] = None
     ) -> Generator[Tuple[List[str], str, str, Dict, str], None, None]:
-        """
-        Run the complete keyframe generation process.
-
-        Args:
-            storyboard: Loaded storyboard
-            workflow_file: Workflow template filename
-            checkpoint: Generation checkpoint state
-            project: Active project metadata
-            comfy_url: ComfyUI server URL
-            progress_callback: Optional progress reporting function
-
-        Yields:
-            Tuple of (images, status, progress_md, checkpoint, current_shot)
-        """
+        """Run the complete keyframe generation process."""
         try:
             # Initialize API and test connection
             self.api = ComfyUIAPI(comfy_url)
@@ -118,6 +137,11 @@ class KeyframeGenerationService:
                 return
 
             workflow = self.api.load_workflow(workflow_path)
+
+            # Inject model override if specified
+            if model_override:
+                workflow = inject_model_override(workflow, model_override)
+                logger.info(f"Model override applied: {model_override}")
 
             # Extract generation settings
             variants_per_shot = checkpoint["variants_per_shot"]
@@ -143,19 +167,16 @@ class KeyframeGenerationService:
 
             # Generate keyframes for each shot
             for shot_idx, shot in enumerate(shots):
-                # Check for stop request
                 if self.stop_requested:
                     yield from self._handle_stop(checkpoint, all_generated_images, total_shots, project)
                     return
 
                 shot_id = shot.get("shot_id", f"{shot_idx+1:03d}")
 
-                # Skip already completed shots
                 if shot_id in completed_shots:
                     logger.info(f"Skipping shot {shot_id} (already completed)")
                     continue
 
-                # Generate this shot's variants
                 generator = self._generate_shot(
                     shot=shot,
                     shot_idx=shot_idx,
@@ -169,7 +190,8 @@ class KeyframeGenerationService:
                     project=project,
                     images_done=images_done,
                     total_images_est=total_images_est,
-                    progress_callback=progress_callback
+                    progress_callback=progress_callback,
+                    base_workflow_file=workflow_file
                 )
 
                 for shot_images, status, progress_md, updated_checkpoint, current_shot in generator:
@@ -217,7 +239,8 @@ class KeyframeGenerationService:
         project: Dict[str, Any],
         images_done: int,
         total_images_est: int,
-        progress_callback=None
+        progress_callback=None,
+        base_workflow_file: str = ""
     ) -> Generator[Tuple[List[str], str, str, Dict, str], None, None]:
         """Generate all variants for a single shot."""
         checkpoint["current_shot"] = shot_id
@@ -226,6 +249,18 @@ class KeyframeGenerationService:
 
         if progress_callback and callable(progress_callback):
             progress_callback(min(0.95, images_done / total_images_est), desc=f"{shot_id}: Start")
+
+        # Determine if this shot needs a different workflow (LoRA vs non-LoRA)
+        shot_workflow = workflow
+        if base_workflow_file:
+            needed_workflow_file = get_workflow_for_shot(
+                shot, base_workflow_file, self.config.get_workflow_dir()
+            )
+            if needed_workflow_file != base_workflow_file:
+                workflow_path = os.path.join(self.config.get_workflow_dir(), needed_workflow_file)
+                if os.path.exists(workflow_path):
+                    shot_workflow = self.api.load_workflow(workflow_path)
+                    logger.info(f"Loaded LoRA workflow for shot {shot_id}: {needed_workflow_file}")
 
         yield [], f"**Status:** ▶️ Shot {shot_id} gestartet", progress_details, \
               checkpoint, current_shot_display
@@ -236,8 +271,8 @@ class KeyframeGenerationService:
         filename_base = shot.get("filename_base", f"shot_{shot_id}")
         res_width, res_height = self.config.get_resolution_tuple()
 
-        # Clean up any leftover files from previous runs for this shot
-        self._cleanup_old_files(filename_base)
+        # Clean up old files
+        self._file_handler.cleanup_old_files(filename_base)
 
         # Generate variants for this shot
         for variant_idx in range(variants_per_shot):
@@ -251,7 +286,7 @@ class KeyframeGenerationService:
                 variant_idx=variant_idx,
                 variants_per_shot=variants_per_shot,
                 filename_base=filename_base,
-                workflow=workflow,
+                workflow=shot_workflow,
                 base_seed=base_seed,
                 res_width=res_width,
                 res_height=res_height,
@@ -275,8 +310,7 @@ class KeyframeGenerationService:
         checkpoint["completed_shots"].append(shot_id)
         self._save_checkpoint(checkpoint, checkpoint["storyboard_file"], project)
 
-        progress_details = self._format_progress(checkpoint, total_shots)
-        # Yield empty list to avoid duplicates (images already yielded during generation)
+        progress_details = format_progress(checkpoint, total_shots)
         yield [], f"**Status:** ✅ Shot {shot_id} abgeschlossen ({len(shot_images)} Bilder)", \
               progress_details, checkpoint, current_shot_display
 
@@ -310,6 +344,9 @@ class KeyframeGenerationService:
         logger.info(f"Generating variant {variant_idx + 1}/{variants_per_shot} "
                    f"for shot {shot_id} (seed {variant_seed})")
 
+        # Get LoRA params if character is assigned
+        lora_params = self._lora_resolver.get_lora_params_for_shot(shot)
+
         # Update workflow with shot parameters
         updated_workflow = self.api.update_workflow_params(
             workflow,
@@ -317,7 +354,8 @@ class KeyframeGenerationService:
             seed=variant_seed,
             filename_prefix=variant_name,
             width=res_width,
-            height=res_height
+            height=res_height,
+            **lora_params
         )
 
         try:
@@ -326,7 +364,6 @@ class KeyframeGenerationService:
             result = self.api.monitor_progress(prompt_id, timeout=300)
 
             if result["status"] == "success":
-                # Copy generated images
                 copied_images = self._copy_generated_images(
                     variant_name=variant_name,
                     output_dir=output_dir,
@@ -342,7 +379,6 @@ class KeyframeGenerationService:
                             desc=f"{shot_id}: Variant {variant_idx + 1}/{variants_per_shot}"
                         )
 
-                    # Save checkpoint after each variant
                     self._save_checkpoint(checkpoint, checkpoint["storyboard_file"], project)
 
                     variant_progress = self._format_progress(checkpoint, total_shots)
@@ -364,119 +400,6 @@ class KeyframeGenerationService:
             logger.error(f"Error generating variant {variant_idx + 1}: {e}", exc_info=True)
             yield [], f"**Status:** ✗ {shot_id} Variant {variant_idx + 1} error: {e}", \
                   self._format_progress(checkpoint, total_shots), checkpoint, current_shot_display
-
-    def _copy_generated_images(
-        self,
-        variant_name: str,
-        output_dir: str,
-        api_result: Dict[str, Any],
-        max_retries: int = 30,
-        retry_delay: float = 1.0
-    ) -> List[str]:
-        """Move generated images from ComfyUI output to project directory.
-
-        Includes retry mechanism to handle race condition where ComfyUI reports
-        success via WebSocket before the file is fully written to disk.
-        """
-        import time
-        moved_images = []
-
-        # Move from ComfyUI output directory
-        try:
-            comfy_output = self.project_store.comfy_output_dir()
-
-            # Try multiple patterns to find the images
-            patterns = [
-                os.path.join(comfy_output, f"{variant_name}_*.png"),  # Direct in output/
-                os.path.join(comfy_output, f"{variant_name}*.png"),   # Fallback pattern
-            ]
-
-            logger.debug(f"Searching for images matching '{variant_name}' in {comfy_output}")
-
-            # Retry loop to wait for file to appear on disk
-            for attempt in range(max_retries):
-                seen_sources = set()
-                seen_destinations = set()
-
-                for pattern in patterns:
-                    matches = glob.glob(pattern)
-
-                    for src in matches:
-                        if src in seen_sources:
-                            continue
-                        seen_sources.add(src)
-
-                        dest = os.path.join(output_dir, os.path.basename(src))
-
-                        if dest in seen_destinations:
-                            logger.warning(f"Skipping duplicate destination: {dest}")
-                            continue
-                        seen_destinations.add(dest)
-
-                        # MOVE instead of copy to avoid duplicates
-                        shutil.move(src, dest)
-                        moved_images.append(dest)
-                        logger.info(f"Moved image: {os.path.basename(src)} → {output_dir}")
-
-                if moved_images:
-                    break  # Found and moved files, exit retry loop
-
-                if attempt < max_retries - 1:
-                    logger.debug(f"No files found yet, retry {attempt + 1}/{max_retries} in {retry_delay}s")
-                    time.sleep(retry_delay)
-
-            if not moved_images:
-                logger.warning(f"No images found for pattern '{variant_name}' after {max_retries} retries")
-                logger.warning(f"Tried patterns: {patterns}")
-                # List what's actually in the directory for debugging
-                try:
-                    all_files = [f for f in os.listdir(comfy_output) if f.endswith('.png')]
-                    logger.debug(f"PNG files in {comfy_output}: {all_files[:10]}")
-                except Exception:
-                    pass
-
-        except Exception as e:
-            logger.error(f"Failed to move images for {variant_name}: {e}", exc_info=True)
-
-        return moved_images
-
-    def _cleanup_old_files(self, filename_base: str) -> int:
-        """Move leftover files from ComfyUI output directory to temp folder.
-
-        This prevents picking up old files from failed/previous runs.
-        Files are moved to output/temp/{timestamp}/ instead of deleted.
-
-        Args:
-            filename_base: Base filename for the shot (e.g., 'opening-scene')
-
-        Returns:
-            Number of files moved
-        """
-        try:
-            comfy_output = self.project_store.comfy_output_dir()
-            pattern = os.path.join(comfy_output, f"{filename_base}_v*_*.png")
-            old_files = glob.glob(pattern)
-
-            if old_files:
-                # Create temp directory with timestamp
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                temp_dir = os.path.join(comfy_output, "temp", timestamp)
-                os.makedirs(temp_dir, exist_ok=True)
-
-                logger.info(f"Moving {len(old_files)} old file(s) for '{filename_base}' to {temp_dir}")
-                for old_file in old_files:
-                    try:
-                        dest = os.path.join(temp_dir, os.path.basename(old_file))
-                        shutil.move(old_file, dest)
-                        logger.debug(f"Moved old file: {old_file} → {temp_dir}")
-                    except OSError as e:
-                        logger.warning(f"Failed to move {old_file}: {e}")
-
-            return len(old_files)
-
-        except Exception as e:
-            logger.error(f"Cleanup failed for {filename_base}: {e}")
-            return 0
 
     def _handle_stop(
         self,
@@ -504,47 +427,10 @@ class KeyframeGenerationService:
         self.stop_requested = False
         return "**ℹ️ Kein Lauf aktiv.**", "Kein aktiver Fortschritt."
 
-    def _format_progress(self, checkpoint: Dict, total_shots: int) -> str:
-        """Format progress details as markdown."""
-        completed = len(checkpoint.get("completed_shots", []))
-        total_images = checkpoint.get("total_images_generated", 0)
-        current_shot = checkpoint.get("current_shot", "None")
-        status = checkpoint.get("status", "unknown")
-
-        progress_md = f"""### Progress
-
-- **Status:** {status}
-- **Completed Shots:** {completed}/{total_shots}
-- **Total Images Generated:** {total_images}
-- **Current Shot:** {current_shot}
-- **Started:** {checkpoint.get('started_at', 'N/A')}
-"""
-
-        if status == "completed":
-            progress_md += f"- **Completed:** {checkpoint.get('completed_at', 'N/A')}\n"
-
-        return progress_md
-
-    def _save_checkpoint(
-        self,
-        checkpoint: Dict[str, Any],
-        storyboard_file: str,
-        project: Dict[str, Any]
-    ):
-        """Save checkpoint to file."""
-        try:
-            checkpoint_dir = self.project_store.ensure_dir(project, "checkpoints")
-            # Use only the filename, not the full path
-            storyboard_filename = os.path.basename(storyboard_file)
-            checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{storyboard_filename}")
-
-            with open(checkpoint_file, "w") as f:
-                json.dump(checkpoint, f, indent=2)
-
-            logger.debug(f"Checkpoint saved: {checkpoint_file}")
-
-        except Exception as e:
-            logger.error(f"Failed to save checkpoint: {e}", exc_info=True)
+    # Legacy method for backwards compatibility
+    def get_workflow_for_shot(self, shot: Dict[str, Any], base_workflow_file: str) -> str:
+        """Determine which workflow to use for a shot."""
+        return get_workflow_for_shot(shot, base_workflow_file, self.config.get_workflow_dir())
 
 
 __all__ = ["KeyframeService", "KeyframeGenerationService"]

@@ -7,16 +7,17 @@ import gradio as gr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.base_addon import BaseAddon
+from addons.components import create_folder_scanner, project_status_md, shorten_storyboard_path
 from infrastructure.config_manager import ConfigManager
-from infrastructure.workflow_registry import WorkflowRegistry
+from infrastructure.workflow_registry import WorkflowRegistry, PREFIX_KEYFRAME, PREFIX_KEYFRAME_LORA
 from infrastructure.project_store import ProjectStore
 from infrastructure.logger import get_logger
-from infrastructure.error_handler import handle_errors
 from infrastructure.error_handler import handle_errors
 from domain import models as domain_models
 from domain.storyboard_service import StoryboardService
 from domain.validators import KeyframeGeneratorInput, WorkflowFileInput
 from services.keyframe_service import KeyframeGenerationService, KeyframeService
+from services.character_lora_service import CharacterLoraService
 
 logger = get_logger(__name__)
 class KeyframeGeneratorAddon(BaseAddon):
@@ -38,143 +39,125 @@ class KeyframeGeneratorAddon(BaseAddon):
             config=self.config,
             project_store=self.project_manager
         )
+        self.character_lora_service = CharacterLoraService(self.config)
 
     def get_tab_name(self) -> str:
         return "🎬 Keyframe Generator"
+
+    def _project_status_md(self) -> str:
+        project = self.project_manager.get_active_project(refresh=True)
+        if not project:
+            return "Kein aktives Projekt"
+        name = project.get("name", "Unbekannt")
+        slug = project.get("slug", "unbekannt")
+        path = project.get("path", "")
+        return f"Projekt: {name} ({slug}) – {path}"
 
     def render(self) -> gr.Blocks:
         # Auto-load storyboard on tab open
         initial_storyboard_json, initial_status = self.load_storyboard_from_config()
 
         with gr.Blocks() as interface:
-            gr.Markdown("# 🎬 Keyframe Generator - Phase 1")
-            gr.HTML("""<script>
-  window.addEventListener('beforeunload', function (e) {
-    const confirmationMessage = 'Stop/Start ist nicht refresh-sicher. Wirklich neu laden?';
-    (e || window.event).returnValue = confirmationMessage;
-    return confirmationMessage;
-  });
-</script>
-<style>
-  .inline-row { gap: 6px; }
-  .icon-button button { min-width: 38px; max-width: 42px; min-height: 38px; padding: 6px; }
-  .primary-full button { width: 100%; }
-  .secondary-full button { width: 100%; min-height: 40px; }
-  .status-line { font-weight: 600; }
-</style>""")
+            # Unified header: Tab name left, project status right
+            project_status = gr.HTML(project_status_md(self.project_manager, "🎬 Keyframe Generator"))
 
-            # Storyboard info (consistent with other tabs)
-            with gr.Row():
-                storyboard_info = gr.Markdown(self._get_storyboard_info())
-                refresh_btn = gr.Button("↻ Refresh", scale=0, min_width=60)
+            # Storyboard info (auto-refresh from config)
+            storyboard_info = gr.Markdown(self._get_storyboard_info())
 
             with gr.Row():
-                with gr.Column():
+                # Left Column: Setup & Controls (25%)
+                with gr.Column(scale=1):
                     with gr.Group():
                         gr.Markdown("### ⚙️ Setup")
 
-                        with gr.Row(elem_classes=["inline-row"]):
-                            workflow_dropdown = gr.Dropdown(
-                                choices=self._get_available_workflows(),
-                                value=self._get_default_workflow(),
-                                label="Workflow Template",
-                                info="Flux workflow to use for generation",
-                                scale=8
-                            )
-                            refresh_workflow_btn = gr.Button("↻", variant="secondary", elem_classes=["icon-button"], scale=1, min_width=42)
+                        # Workflow scanner with action buttons
+                        workflow_scanner = create_folder_scanner(
+                            label="Workflow Template",
+                            choices=self._get_available_workflows(),
+                            value=self._get_default_workflow(),
+                            info="Keyframe-Workflow (gcp_*)",
+                            show_refresh=False,
+                            action_buttons=[
+                                ("⭐ Set as Default", "secondary", "sm"),
+                                ("🔄 Scan", "secondary", "sm"),
+                            ]
+                        )
+                        workflow_dropdown = workflow_scanner.dropdown
+                        set_default_btn = workflow_scanner.action_btns[0]
+                        rescan_btn = workflow_scanner.action_btns[1]
+                        workflow_status = gr.Markdown("")
 
-                        with gr.Row():
-                            variants_per_shot = gr.Slider(
-                                minimum=1,
-                                maximum=10,
-                                value=4,
-                                step=1,
-                                label="Variants per Shot",
-                                info="Number of keyframe variants to generate for each shot"
-                            )
-                            base_seed = gr.Number(
-                                value=2000,
-                                label="Base Seed",
-                                precision=0,
-                                minimum=0,
-                                maximum=2147483647,
-                                info="Starting seed (will increment for each variant; 0-2147483647)"
-                            )
+                        # Model selection dropdown (populated based on workflow's .models file)
+                        model_dropdown = gr.Dropdown(
+                            choices=self._get_available_models(self._get_default_workflow()),
+                            value=self._get_default_model(self._get_default_workflow()),
+                            label="Diffusion Model",
+                            info="Getestete Modelle für diesen Workflow",
+                            visible=self._has_model_selection(self._get_default_workflow())
+                        )
 
-                        with gr.Accordion("📋 Storyboard Preview (JSON)", open=False):
-                            storyboard_preview = gr.Code(
-                                label="Loaded Storyboard Details",
-                                language="json",
-                                value=initial_storyboard_json,
-                                lines=20,
-                                max_lines=20,
-                                interactive=False
-                            )
+                        # Character-Model compatibility warning
+                        compatibility_warning = gr.Markdown(
+                            value="",
+                            visible=False
+                        )
 
-                with gr.Column():
-                    with gr.Group():
-                        gr.Markdown("### 🚀 Run")
-                        gr.Markdown("**Hinweis:** Start funktioniert, Stop ist experimentell, Resume deaktiviert (nicht refresh-sicher). Bitte Seite nicht neu laden. Robuster Job-Manager folgt in V2.")
+                        variants_per_shot = gr.Slider(
+                            minimum=1,
+                            maximum=10,
+                            value=4,
+                            step=1,
+                            label="Variants per Shot",
+                            info="Number of keyframe variants to generate for each shot"
+                        )
 
-                        with gr.Row():
-                            start_btn = gr.Button("▶️ Start Generation", variant="primary", elem_classes=["primary-full"])
-                        with gr.Row(elem_classes=["inline-row"]):
-                            stop_btn = gr.Button("⏹️ Stop (experimentell)", variant="stop", elem_classes=["secondary-full"])
-                            resume_btn = gr.Button("⏯️ Resume (deaktiviert)", variant="secondary", interactive=False, elem_classes=["secondary-full"])
+                        base_seed = gr.Number(
+                            value=2000,
+                            label="Base Seed",
+                            precision=0,
+                            minimum=0,
+                            maximum=2147483647,
+                            info="Starting seed (increments per variant)"
+                        )
 
-                        status_text = gr.Markdown("**Status:** Ready - Load a storyboard to begin")
+                    # Start Generation Button
+                    start_btn = gr.Button("▶️ Start Generation", variant="primary", size="lg")
 
-                        with gr.Accordion("Progress Details", open=True):
-                            progress_details = gr.Markdown("No generation in progress")
+                    # Status display
+                    status_text = gr.Markdown("**Status:** Ready")
+                    progress_details = gr.Markdown("")
 
-                        with gr.Accordion("💾 Checkpoint Info", open=False):
-                            checkpoint_info = gr.JSON(label="Checkpoint Status", value={})
+                    # Hidden components for checkpoint (needed by generation service)
+                    checkpoint_info = gr.JSON(visible=False, value={})
+                    current_shot_display = gr.Markdown(visible=False, value="")
 
-            with gr.Group():
-                gr.Markdown("## 🖼️ Generated Keyframes")
-                current_shot_display = gr.Markdown("**Current Shot:** None")
-                keyframe_gallery = gr.Gallery(
-                    label="Keyframes (All Variants)",
-                    show_label=True,
-                    columns=4,
-                    rows=2,
-                    height="auto",
-                    object_fit="contain"
-                )
-                with gr.Row(elem_classes=["inline-row"]):
-                    clear_gallery_btn = gr.Button("🗑️ Clear Gallery", variant="secondary", elem_classes=["secondary-full"])
-                    open_output_btn = gr.Button("📁 Open Output Folder", variant="secondary", elem_classes=["secondary-full"])
+                    # Open Output & Clear Gallery Buttons
+                    open_output_btn = gr.Button("📁 Open Output Folder", variant="secondary")
+                    clear_gallery_btn = gr.Button("🗑️ Clear Gallery", variant="secondary")
 
-            refresh_btn.click(
-                fn=self._get_storyboard_info,
-                outputs=[storyboard_info]
-            )
+                # Right Column: Gallery (75%)
+                with gr.Column(scale=3):
+                    gr.Markdown("### 🖼️ Generated Keyframes")
+                    keyframe_gallery = gr.Gallery(
+                        label="Keyframes (All Variants)",
+                        show_label=False,
+                        columns=2,
+                        rows=None,
+                        height="auto",
+                        object_fit="contain",
+                        allow_preview=True
+                    )
 
+            # Event handlers
             start_btn.click(
                 fn=self.start_generation,
-                inputs=[workflow_dropdown, variants_per_shot, base_seed],
+                inputs=[workflow_dropdown, variants_per_shot, base_seed, model_dropdown],
                 outputs=[keyframe_gallery, status_text, progress_details, checkpoint_info, current_shot_display]
-            )
-
-            resume_btn.click(
-                fn=self.resume_generation,
-                inputs=[workflow_dropdown],
-                outputs=[keyframe_gallery, status_text, progress_details, checkpoint_info, current_shot_display]
-            )
-
-            stop_btn.click(
-                fn=self.stop_generation,
-                outputs=[status_text, progress_details]
-            )
-
-            refresh_workflow_btn.click(
-                fn=lambda: gr.update(choices=self._get_available_workflows()),
-                outputs=[workflow_dropdown]
             )
 
             clear_gallery_btn.click(
-                fn=lambda: ([], "**Status:** Gallery cleared"),
-                outputs=[keyframe_gallery, status_text]
+                fn=lambda: ([], "**Status:** Gallery cleared", ""),
+                outputs=[keyframe_gallery, status_text, progress_details]
             )
 
             open_output_btn.click(
@@ -182,16 +165,73 @@ class KeyframeGeneratorAddon(BaseAddon):
                 outputs=[status_text]
             )
 
+            set_default_btn.click(
+                fn=self._set_default_workflow,
+                inputs=[workflow_dropdown],
+                outputs=[workflow_status]
+            )
+
+            rescan_btn.click(
+                fn=self._rescan_workflows,
+                outputs=[workflow_dropdown, workflow_status]
+            )
+
+            # Update model dropdown when workflow changes
+            workflow_dropdown.change(
+                fn=self._on_workflow_change,
+                inputs=[workflow_dropdown],
+                outputs=[model_dropdown, compatibility_warning]
+            )
+
+            # Check character-model compatibility when model changes
+            model_dropdown.change(
+                fn=self._check_character_model_compatibility,
+                inputs=[model_dropdown],
+                outputs=[compatibility_warning]
+            )
+
+            # Auto-refresh storyboard on tab load
             interface.load(
-                fn=self._reset_controls,
-                outputs=[start_btn, stop_btn, resume_btn, status_text, progress_details]
+                fn=self._on_tab_load,
+                outputs=[project_status, storyboard_info, status_text, workflow_dropdown, compatibility_warning]
             )
 
         return interface
 
+    def _on_tab_load(self):
+        """Called when tab loads - refresh storyboard from config and reset status."""
+        self.generation_service.stop_requested = False
+        self.generation_service.is_running = False
+
+        # Refresh config to pick up changes from other tabs (Storyboard Editor, Project tab)
+        self.config.refresh()
+
+        # Project status
+        project_status = project_status_md(self.project_manager, "🎬 Keyframe Generator")
+
+        # Reload storyboard from config (picks up changes from Storyboard Editor)
+        _, load_status = self.load_storyboard_from_config()
+        storyboard_info = self._get_storyboard_info()
+
+        # Determine status based on load result
+        if "Error" in load_status:
+            status = load_status
+        else:
+            status = "**Status:** Ready"
+
+        # Get current default workflow to preserve it on tab refresh
+        default_workflow = self._get_default_workflow()
+        workflow_update = gr.update(value=default_workflow)
+
+        # Check character-model compatibility with default model
+        default_model = self._get_default_model(default_workflow)
+        compatibility_update = self._check_character_model_compatibility(default_model)
+
+        return project_status, storyboard_info, status, workflow_update, compatibility_update
+
     @handle_errors("Failed to load storyboard", return_tuple=True)
     def _load_storyboard_model(self, storyboard_file: str) -> domain_models.Storyboard:
-        storyboard = StoryboardService.load_from_config(self.config, filename=storyboard_file)
+        storyboard = StoryboardService.load_from_config(self.config, storyboard_file)
         StoryboardService.apply_resolution_from_config(storyboard, self.config)
         storyboard.raw["storyboard_file"] = storyboard_file
         return storyboard
@@ -236,11 +276,52 @@ class KeyframeGeneratorAddon(BaseAddon):
         status = f"**✅ Loaded:** {project_name} - {total_shots} shots"
         return storyboard_json, status
 
+    def _storyboard_has_lora(self) -> bool:
+        """Check if current storyboard has any shots with character_lora set."""
+        if not self.current_storyboard:
+            return False
+        for shot in self.current_storyboard.shots:
+            if shot.character_lora:
+                return True
+        return False
+
+    def _resolve_workflow_for_lora(self, workflow_file: str) -> Tuple[str, Optional[str]]:
+        """Resolve workflow file, switching to LoRA variant if needed.
+
+        Args:
+            workflow_file: Selected workflow file (gcp_*)
+
+        Returns:
+            Tuple of (resolved_workflow_file, warning_message or None)
+        """
+        has_lora = self._storyboard_has_lora()
+
+        if not has_lora:
+            # No LoRA in storyboard, use selected workflow
+            return workflow_file, None
+
+        # Storyboard has LoRA - try to find LoRA variant
+        lora_variant = self.workflow_registry.get_lora_variant(workflow_file)
+
+        if lora_variant:
+            logger.info(f"LoRA erkannt im Storyboard - verwende {lora_variant} statt {workflow_file}")
+            return lora_variant, None
+        else:
+            # LoRA in storyboard but no LoRA workflow available
+            warning = (
+                f"⚠️ **Warnung:** Storyboard enthält Character LoRA, aber kein passender "
+                f"`gcpl_*` Workflow gefunden für `{workflow_file}`. "
+                f"LoRA wird ignoriert."
+            )
+            logger.warning(warning)
+            return workflow_file, warning
+
     def start_generation(
         self,
         workflow_file: str,
         variants_per_shot: int,
         base_seed: int,
+        selected_model: str = "(Standard)",
         progress=gr.Progress(track_tqdm=True)
     ) -> Generator[Tuple[List[str], str, str, Dict, str], None, None]:
         self.config.refresh()
@@ -265,9 +346,18 @@ class KeyframeGeneratorAddon(BaseAddon):
                 yield [], load_status, "No progress", {}, "No shot"
                 return
 
+        # Resolve workflow (auto-switch to LoRA variant if needed)
+        resolved_workflow, lora_warning = self._resolve_workflow_for_lora(workflow_file)
+        if lora_warning:
+            yield [], lora_warning, "LoRA Warnung", {}, "Warning"
+            # Continue with generation despite warning
+
+        # Determine model override (None if "(Standard)" selected)
+        model_override = None if selected_model == "(Standard)" else selected_model
+
         checkpoint = self.keyframe_service.prepare_checkpoint(
             storyboard=self.current_storyboard,
-            workflow_file=workflow_file,
+            workflow_file=resolved_workflow,
             variants_per_shot=validated_inputs.variants_per_shot,
             base_seed=validated_inputs.base_seed
         )
@@ -279,11 +369,12 @@ class KeyframeGeneratorAddon(BaseAddon):
 
         yield from self.generation_service.run_generation(
             storyboard=self.current_storyboard,
-            workflow_file=workflow_file,
+            workflow_file=resolved_workflow,
             checkpoint=checkpoint,
             project=project,
             comfy_url=comfy_url,
-            progress_callback=progress
+            progress_callback=progress,
+            model_override=model_override
         )
 
     def resume_generation(
@@ -333,20 +424,8 @@ class KeyframeGeneratorAddon(BaseAddon):
         )
 
     def stop_generation(self) -> Tuple[str, str]:
+        """Stop generation (kept for future use - see Backlog #001)."""
         return self.generation_service.stop_generation()
-
-    def _reset_controls(self):
-        self.generation_service.stop_requested = False
-        self.generation_service.is_running = False
-        status = "**Status:** Bereit. Start kann erneut gedrückt werden."
-        progress_md = "No generation in progress"
-        return (
-            gr.update(interactive=True),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-            status,
-            progress_md,
-        )
 
     def _status_bar(self) -> str:
         project = self.project_manager.get_active_project(refresh=True)
@@ -363,21 +442,13 @@ class KeyframeGeneratorAddon(BaseAddon):
 
         if storyboard:
             sb_badge = "✅" if os.path.exists(storyboard) else "⚠️"
-            parts.append(f"Storyboard: {sb_badge} `{self._short_storyboard_path(storyboard)}`")
+            parts.append(f"Storyboard: {sb_badge} `{shorten_storyboard_path(storyboard)}`")
         else:
             parts.append("Storyboard: ⚠️ keines gesetzt")
 
         parts.append(f"Auflösung: {width}x{height}")
         parts.append(f"ComfyUI: {comfy_url}")
         return " | ".join(parts)
-
-    def _short_storyboard_path(self, abs_path: str) -> str:
-        if not abs_path:
-            return abs_path
-        marker = "/output/"
-        if marker in abs_path:
-            return abs_path.split(marker, 1)[-1]
-        return os.path.basename(abs_path)
 
     @handle_errors("Konnte Ausgabeordner nicht öffnen")
     def open_output_folder(self) -> str:
@@ -389,34 +460,157 @@ class KeyframeGeneratorAddon(BaseAddon):
         os.system(f'xdg-open "{output_dir}"')
         return f"**📁 Opened:** `{output_dir}`"
 
-    def _project_status_md(self) -> str:
-        project = self.project_manager.get_active_project(refresh=True)
-        if not project:
-            return "**❌ Kein aktives Projekt:** Bitte im Tab `📁 Projekt` anlegen oder auswählen."
-        return (
-            f"**Aktives Projekt:** {project.get('name')} (`{project.get('slug')}`)\n"
-            f"- Pfad: `{project.get('path')}`"
-        )
-
     def _get_storyboard_info(self) -> str:
-        """Get storyboard info for display (consistent with other tabs)."""
+        """Get storyboard info for display."""
         self.config.refresh()
-        project = self.project_manager.get_active_project(refresh=True)
-        if not project:
-            return "**Storyboard:** ❌ No active project - create one in Tab 📁 Projekt"
-
-        storyboard_path = self.config.get_current_storyboard()
-        if storyboard_path:
-            return f"**Storyboard:** {storyboard_path}\n\n*(aus Tab 📁 Projektverwaltung)*"
-        else:
-            return "**Storyboard:** ❌ No storyboard selected - select one in Tab 📁 Projekt"
+        storyboard_file = self.config.get_current_storyboard()
+        if not storyboard_file or not os.path.exists(storyboard_file):
+            return "**Storyboard:** Nicht geladen"
+        filename = os.path.basename(storyboard_file)
+        return f"**Storyboard:** `{filename}`"
 
     def _get_available_workflows(self) -> List[str]:
-        workflows = self.workflow_registry.get_files(category="flux")
-        return workflows if workflows else ["No workflows found - update workflow_presets.json"]
+        """Get available keyframe workflows (gcp_* prefix)."""
+        workflows = self.workflow_registry.get_files(PREFIX_KEYFRAME)
+        return workflows if workflows else ["No gcp_* workflows found"]
 
     def _get_default_workflow(self) -> Optional[str]:
-        return self.workflow_registry.get_default(category="flux")
+        """Get default keyframe workflow from SQLite."""
+        return self.workflow_registry.get_default(PREFIX_KEYFRAME)
+
+    def _set_default_workflow(self, workflow_file: str) -> str:
+        """Set selected workflow as default for keyframe generation."""
+        if not workflow_file or workflow_file.startswith("No "):
+            return "**⚠️ Kein Workflow ausgewählt**"
+
+        success = self.workflow_registry.set_default(PREFIX_KEYFRAME, workflow_file)
+        if success:
+            display_name = self.workflow_registry.get_display_name(workflow_file)
+            logger.info(f"Set default keyframe workflow: {workflow_file}")
+            return f"**✅ Default gesetzt:** {display_name}"
+        else:
+            return "**❌ Fehler beim Setzen des Defaults**"
+
+    def _rescan_workflows(self):
+        """Rescan filesystem for workflows and update cache."""
+        count, _ = self.workflow_registry.rescan(PREFIX_KEYFRAME)
+        # Also scan LoRA variants
+        lora_count, _ = self.workflow_registry.rescan(PREFIX_KEYFRAME_LORA)
+
+        workflows = self._get_available_workflows()
+        default = self._get_default_workflow()
+
+        status = f"**✅ Scan abgeschlossen:** {count} Keyframe + {lora_count} LoRA Workflows"
+        return gr.update(choices=workflows, value=default), status
+
+    def _get_comfy_models_dir(self) -> str:
+        """Get ComfyUI models directory path."""
+        return os.path.join(self.config.get_comfy_root(), "models")
+
+    def _get_available_models(self, workflow_file: Optional[str]) -> List[str]:
+        """Get available compatible models for a workflow.
+
+        Args:
+            workflow_file: Workflow filename
+
+        Returns:
+            List of model paths (relative), or ["(Standard)"] if no .models file
+        """
+        if not workflow_file:
+            return ["(Standard)"]
+
+        comfy_models_dir = self._get_comfy_models_dir()
+        models = self.workflow_registry.get_available_compatible_models(workflow_file, comfy_models_dir)
+
+        if not models:
+            return ["(Standard)"]
+
+        # Return just the paths (display_name, path) -> path
+        return [path for _, path in models]
+
+    def _get_default_model(self, workflow_file: Optional[str]) -> Optional[str]:
+        """Get default model for a workflow (first available)."""
+        models = self._get_available_models(workflow_file)
+        if models and models[0] != "(Standard)":
+            return models[0]
+        return "(Standard)"
+
+    def _has_model_selection(self, workflow_file: Optional[str]) -> bool:
+        """Check if workflow has model selection (.models file with available models)."""
+        if not workflow_file:
+            return False
+        return len(self._get_available_models(workflow_file)) > 0 and \
+               self._get_available_models(workflow_file)[0] != "(Standard)"
+
+    def _on_workflow_change(self, workflow_file: str):
+        """Update model dropdown when workflow changes."""
+        models = self._get_available_models(workflow_file)
+        default_model = self._get_default_model(workflow_file)
+        has_models = self._has_model_selection(workflow_file)
+
+        # Also check compatibility with new default model
+        warning_update = self._check_character_model_compatibility(default_model)
+
+        return (
+            gr.update(
+                choices=models,
+                value=default_model,
+                visible=has_models
+            ),
+            warning_update
+        )
+
+    def _check_character_model_compatibility(self, selected_model: str):
+        """Check if selected model is compatible with storyboard characters.
+
+        Returns:
+            gr.update for compatibility_warning component
+        """
+        if not selected_model or selected_model == "(Standard)":
+            return gr.update(value="", visible=False)
+
+        if not self.current_storyboard:
+            return gr.update(value="", visible=False)
+
+        # Collect all unique character_loras from storyboard
+        character_loras = set()
+        for shot in self.current_storyboard.shots:
+            if shot.character_lora:
+                character_loras.add(shot.character_lora)
+
+        if not character_loras:
+            return gr.update(value="", visible=False)
+
+        # Check compatibility for each character
+        warnings = []
+        for char_id in character_loras:
+            result = self.character_lora_service.get_compatibility_warning(char_id, selected_model)
+            if result:
+                warning_msg, compatible_models = result
+                warnings.append(warning_msg)
+
+        if warnings:
+            full_warning = "\n\n".join(warnings)
+            full_warning += "\n\n**Trotzdem generieren?** Die Generation wird nicht blockiert."
+            return gr.update(value=full_warning, visible=True)
+
+        return gr.update(value="", visible=False)
+
+    def _get_storyboard_characters(self) -> List[str]:
+        """Get all character_lora IDs from current storyboard.
+
+        Returns:
+            List of unique character IDs
+        """
+        if not self.current_storyboard:
+            return []
+
+        characters = set()
+        for shot in self.current_storyboard.shots:
+            if shot.character_lora:
+                characters.add(shot.character_lora)
+
+        return list(characters)
 
     def _save_checkpoint(self, checkpoint: Dict[str, Any], storyboard_file: str, project: Dict[str, Any]):
         try:

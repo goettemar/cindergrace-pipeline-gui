@@ -1,127 +1,491 @@
-"""Workflow preset registry and helpers"""
+"""Workflow registry with prefix-based discovery and legacy presets."""
 import json
 import os
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Optional, Tuple
+
+from infrastructure.settings_store import SettingsStore
+from infrastructure.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+# Workflow prefixes
+PREFIX_KEYFRAME = "gcp_"        # Keyframe/Picture generation (Flux, SDXL, etc.)
+PREFIX_KEYFRAME_LORA = "gcpl_"  # Keyframe with LoRA support (auto-selected when character_lora set)
+PREFIX_VIDEO = "gcv_"           # Video generation (Wan i2v, etc.)
+PREFIX_VIDEO_FIRSTLAST = "gcvfl_"  # First-Last-Frame video (image morphing)
+PREFIX_LIPSYNC = "gcl_"         # Lipsync (Wan is2v)
+
+# All prefixes for bulk operations
+ALL_PREFIXES = [PREFIX_KEYFRAME, PREFIX_KEYFRAME_LORA, PREFIX_VIDEO, PREFIX_VIDEO_FIRSTLAST, PREFIX_LIPSYNC]
 
 
 class WorkflowRegistry:
-    """Manage categorized workflow presets stored in config/workflow_presets.json"""
+    """Manage workflow discovery based on filename prefixes and legacy presets.
+
+    Workflows are cached in SQLite database for stability.
+    Use rescan() to update the cache when workflows are added/removed.
+
+    Workflow prefixes:
+    - gcp_* : Keyframe/Picture workflows (for Keyframe Generator)
+    - gcpl_* : Keyframe with LoRA workflows
+    - gcv_* : Video workflows (for Video Generator)
+    - gcvfl_* : First-Last-Frame video workflows
+    - gcl_* : Lipsync workflows (for Lipsync Addon)
+    """
 
     def __init__(
         self,
         config_path: str = "config/workflow_presets.json",
-        workflow_dir: str = "config/workflow_templates"
+        workflow_dir: str = "config/workflow_templates",
     ):
         self.config_path = config_path
         self.workflow_dir = workflow_dir
+        self.settings_store = SettingsStore()
 
-    # ------------------------------------------------------------------ #
-    # Preset loading / saving
-    # ------------------------------------------------------------------ #
-    def _load_presets(self) -> Dict[str, Any]:
+    # -----------------------------
+    # Prefix-based discovery (new)
+    # -----------------------------
+    def _scan_filesystem(self, prefix: str) -> List[str]:
+        """Scan workflow directory for files with given prefix (internal).
+
+        Args:
+            prefix: Filename prefix to filter (e.g., 'gcp_', 'gcv_', 'gcl_')
+
+        Returns:
+            Sorted list of matching workflow filenames
+        """
+        if not os.path.exists(self.workflow_dir):
+            logger.warning(f"Workflow-Verzeichnis nicht gefunden: {self.workflow_dir}")
+            return []
+
+        workflows = []
+        for filename in os.listdir(self.workflow_dir):
+            if filename.startswith(prefix) and filename.endswith(".json"):
+                workflows.append(filename)
+
+        workflows.sort()
+        return workflows
+
+    def _get_files_by_prefix(self, prefix: str) -> List[str]:
+        """Get workflow files for a prefix from cache.
+
+        Reads from SQLite cache. If cache is empty, performs initial scan.
+
+        Args:
+            prefix: Workflow prefix ('gcp_', 'gcv_', 'gcl_', etc.)
+
+        Returns:
+            List of workflow filenames
+        """
+        # Try to get from cache
+        cached = self.settings_store.get_workflow_list(prefix)
+        if cached:
+            return cached
+
+        # Cache empty - perform initial scan
+        logger.info(f"Kein Workflow-Cache für {prefix} - scanne Filesystem...")
+        workflows = self._scan_filesystem(prefix)
+        if workflows:
+            self.settings_store.set_workflow_list(prefix, workflows)
+        return workflows
+
+    def rescan(self, prefix: str = None) -> Tuple[int, List[str]]:
+        """Rescan filesystem and update cache.
+
+        Args:
+            prefix: Specific prefix to rescan, or None for all prefixes
+
+        Returns:
+            Tuple of (total_count, list_of_prefixes_scanned)
+        """
+        prefixes = [prefix] if prefix else ALL_PREFIXES
+        total = 0
+        scanned = []
+
+        for p in prefixes:
+            workflows = self._scan_filesystem(p)
+            self.settings_store.set_workflow_list(p, workflows)
+            total += len(workflows)
+            scanned.append(p)
+            logger.info(f"Rescan {p}: {len(workflows)} Workflows gefunden")
+
+        return total, scanned
+
+    def _get_default_by_prefix(self, prefix: str) -> Optional[str]:
+        """Get default workflow for a prefix from SQLite.
+
+        Args:
+            prefix: Workflow prefix ('gcp_', 'gcv_', 'gcl_')
+
+        Returns:
+            Default workflow filename or first available, or None
+        """
+        # Try to get saved default from database
+        default = self.settings_store.get_default_workflow(prefix)
+
+        if default:
+            # Verify it's still in the cached list
+            cached = self.get_files(prefix)
+            if default in cached:
+                return default
+            else:
+                logger.warning(f"Default Workflow '{default}' nicht mehr in Liste - verwende ersten")
+
+        # Fallback to first available from cache
+        workflows = self.get_files(prefix)
+        if workflows:
+            return workflows[0]
+        return None
+
+    def set_default(self, prefix: str, workflow_file: str) -> bool:
+        """Set default workflow for a prefix in SQLite.
+
+        Args:
+            prefix: Workflow prefix ('gcp_', 'gcv_', 'gcl_')
+            workflow_file: Workflow filename to set as default
+
+        Returns:
+            True if successful, False if file not in cache
+        """
+        # Verify it's in the cached list
+        cached = self.get_files(prefix)
+        if workflow_file not in cached:
+            logger.error(f"Workflow '{workflow_file}' nicht in Cache - bitte zuerst scannen")
+            return False
+
+        # Verify prefix matches
+        if not workflow_file.startswith(prefix):
+            logger.error(f"Workflow {workflow_file} hat nicht Präfix {prefix}")
+            return False
+
+        self.settings_store.set_default_workflow(prefix, workflow_file)
+        return True
+
+    def get_workflow_path(self, filename: str) -> str:
+        """Get full path to a workflow file.
+
+        Args:
+            filename: Workflow filename
+
+        Returns:
+            Full path to workflow file
+        """
+        return os.path.join(self.workflow_dir, filename)
+
+    def workflow_exists(self, filename: str) -> bool:
+        """Check if a workflow file exists on filesystem.
+
+        Args:
+            filename: Workflow filename
+
+        Returns:
+            True if file exists
+        """
+        return os.path.exists(self.get_workflow_path(filename))
+
+    def get_display_name(self, filename: str) -> str:
+        """Generate display name from workflow filename.
+
+        Converts 'gcp_flux_krea_dev_fp8.json' to 'Flux Krea Dev Fp8'
+
+        Args:
+            filename: Workflow filename
+
+        Returns:
+            Human-readable display name
+        """
+        # Remove prefix and extension
+        name = filename
+        for prefix in ALL_PREFIXES:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                break
+
+        if name.endswith(".json"):
+            name = name[:-5]
+
+        # Convert underscores to spaces and title case
+        name = name.replace("_", " ").title()
+        return name
+
+    def get_dropdown_choices(self, prefix: str) -> List[tuple]:
+        """Get workflow choices for Gradio dropdown.
+
+        Args:
+            prefix: Workflow prefix
+
+        Returns:
+            List of (display_name, filename) tuples
+        """
+        workflows = self.get_files(prefix)
+        return [(self.get_display_name(f), f) for f in workflows]
+
+    def get_lora_variant(self, workflow_file: str) -> Optional[str]:
+        """Get LoRA variant of a keyframe workflow if it exists.
+
+        Converts gcp_* to gcpl_* and checks if it exists in cache.
+
+        Args:
+            workflow_file: Original workflow filename (gcp_*)
+
+        Returns:
+            LoRA variant filename (gcpl_*) if exists, None otherwise
+        """
+        if not workflow_file or not workflow_file.startswith(PREFIX_KEYFRAME):
+            return None
+
+        # Convert gcp_ to gcpl_
+        lora_file = PREFIX_KEYFRAME_LORA + workflow_file[len(PREFIX_KEYFRAME):]
+
+        # Check if in cache
+        lora_workflows = self.get_files(PREFIX_KEYFRAME_LORA)
+        if lora_file in lora_workflows:
+            logger.debug(f"LoRA-Variante gefunden: {lora_file}")
+            return lora_file
+
+        return None
+
+    def has_lora_variant(self, workflow_file: str) -> bool:
+        """Check if a LoRA variant exists for this workflow.
+
+        Args:
+            workflow_file: Original workflow filename (gcp_*)
+
+        Returns:
+            True if gcpl_* variant exists
+        """
+        return self.get_lora_variant(workflow_file) is not None
+
+    def get_status(self) -> dict:
+        """Get status information about the workflow registry.
+
+        Returns:
+            Status dictionary with counts per prefix
+        """
+        return {
+            "workflow_dir": self.workflow_dir,
+            "workflow_dir_exists": os.path.exists(self.workflow_dir),
+            "keyframe_workflows": len(self._get_files_by_prefix(PREFIX_KEYFRAME)),
+            "keyframe_lora_workflows": len(self._get_files_by_prefix(PREFIX_KEYFRAME_LORA)),
+            "video_workflows": len(self._get_files_by_prefix(PREFIX_VIDEO)),
+            "firstlast_workflows": len(self._get_files_by_prefix(PREFIX_VIDEO_FIRSTLAST)),
+            "lipsync_workflows": len(self._get_files_by_prefix(PREFIX_LIPSYNC)),
+            "default_keyframe": self._get_default_by_prefix(PREFIX_KEYFRAME),
+            "default_video": self._get_default_by_prefix(PREFIX_VIDEO),
+            "default_firstlast": self._get_default_by_prefix(PREFIX_VIDEO_FIRSTLAST),
+            "default_lipsync": self._get_default_by_prefix(PREFIX_LIPSYNC),
+        }
+
+    def get_models_file_path(self, workflow_file: str) -> str:
+        """Get path to the .models sidecar file for a workflow.
+
+        Args:
+            workflow_file: Workflow filename (e.g., 'gcp_flux1_krea_dev.json')
+
+        Returns:
+            Path to .models file (e.g., '/path/to/gcp_flux1_krea_dev.models')
+        """
+        base_name = workflow_file.rsplit('.', 1)[0]  # Remove .json
+        return os.path.join(self.workflow_dir, f"{base_name}.models")
+
+    def get_compatible_models(self, workflow_file: str) -> List[str]:
+        """Parse .models sidecar file and return list of compatible model paths.
+
+        Args:
+            workflow_file: Workflow filename
+
+        Returns:
+            List of model paths (relative to ComfyUI/models/), empty if no .models file
+        """
+        models_path = self.get_models_file_path(workflow_file)
+
+        if not os.path.exists(models_path):
+            logger.debug(f"Keine .models Datei für {workflow_file}")
+            return []
+
+        models = []
+        try:
+            with open(models_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip empty lines and comments
+                    if not line or line.startswith('#'):
+                        continue
+                    models.append(line)
+
+            logger.info(f"Geladene kompatible Modelle für {workflow_file}: {len(models)}")
+            return models
+        except Exception as e:
+            logger.error(f"Fehler beim Lesen von {models_path}: {e}")
+            return []
+
+    def get_available_compatible_models(
+        self,
+        workflow_file: str,
+        comfy_models_dir: str
+    ) -> List[Tuple[str, str]]:
+        """Get models that are both compatible AND available on filesystem.
+
+        Args:
+            workflow_file: Workflow filename
+            comfy_models_dir: Path to ComfyUI/models directory
+
+        Returns:
+            List of (display_name, relative_path) tuples for available models
+        """
+        compatible = self.get_compatible_models(workflow_file)
+
+        if not compatible:
+            # No .models file - return empty (no model selection)
+            return []
+
+        available = []
+        for model_path in compatible:
+            full_path = os.path.join(comfy_models_dir, model_path)
+            if os.path.exists(full_path):
+                # Create display name from filename
+                filename = os.path.basename(model_path)
+                display_name = filename.rsplit('.', 1)[0]  # Remove extension
+                available.append((display_name, model_path))
+            else:
+                logger.debug(f"Kompatibles Modell nicht verfügbar: {model_path}")
+
+        logger.info(f"Verfügbare kompatible Modelle: {len(available)} von {len(compatible)}")
+        return available
+
+    def has_models_file(self, workflow_file: str) -> bool:
+        """Check if a .models sidecar file exists for this workflow.
+
+        Args:
+            workflow_file: Workflow filename
+
+        Returns:
+            True if .models file exists
+        """
+        return os.path.exists(self.get_models_file_path(workflow_file))
+
+    # -----------------------------
+    # Legacy presets (workflow_presets.json)
+    # -----------------------------
+    def _load_presets(self) -> Dict[str, Dict[str, list]]:
+        """Load legacy presets JSON file."""
         if not os.path.exists(self.config_path):
             return {"categories": {}}
         try:
-            with open(self.config_path, "r") as f:
-                return json.load(f)
-        except Exception as exc:
-            print(f"⚠️  Failed to load workflow presets ({exc}). Falling back to directory scan.")
+            with open(self.config_path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if not isinstance(data, dict) or "categories" not in data:
+                return {"categories": {}}
+            return data
+        except Exception:
+            print("⚠️ Failed to load workflow presets")
             return {"categories": {}}
 
-    def get_presets(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_presets(self, category: Optional[str] = None) -> List[Dict[str, str]]:
+        """Return workflow presets from config file."""
         data = self._load_presets()
         categories = data.get("categories", {})
         if category:
-            return categories.get(category, [])
-
-        presets: List[Dict[str, Any]] = []
-        for items in categories.values():
-            presets.extend(items)
+            return list(categories.get(category, []))
+        presets: List[Dict[str, str]] = []
+        for entries in categories.values():
+            presets.extend(entries)
         return presets
 
-    def get_files(self, category: Optional[str] = None) -> List[str]:
-        presets = self.get_presets(category)
+    def _get_files_from_presets(self, category: Optional[str] = None) -> List[str]:
+        """Get workflow files using legacy presets."""
+        presets = self.get_presets(category=category)
         files: List[str] = []
-        seen = set()
-
-        for preset in presets:
-            file_name = preset.get("file")
-            if not file_name or file_name in seen:
+        for entry in presets:
+            filename = entry.get("file")
+            if not filename:
                 continue
-            path = os.path.join(self.workflow_dir, file_name)
-            if os.path.exists(path):
-                files.append(file_name)
-                seen.add(file_name)
+            full_path = os.path.join(self.workflow_dir, filename)
+            if os.path.exists(full_path):
+                if filename not in files:
+                    files.append(filename)
             else:
-                print(f"⚠️  Workflow preset missing file: {file_name} ({path})")
+                print(f"⚠️ Workflow preset missing file: {filename}")
 
         if files:
             return files
 
-        # fallback: scan directory
-        if not os.path.exists(self.workflow_dir):
+        # Fallback to scanning directory
+        if not os.path.isdir(self.workflow_dir):
             return []
+        for filename in sorted(os.listdir(self.workflow_dir)):
+            if filename.endswith(".json"):
+                files.append(filename)
+        return files
 
-        return sorted(
-            [
-                f for f in os.listdir(self.workflow_dir)
-                if f.endswith(".json")
-            ]
-        )
-
-    def get_default(self, category: Optional[str] = None) -> Optional[str]:
-        presets = self.get_presets(category)
-
-        for preset in presets:
-            if preset.get("default"):
-                file_name = preset.get("file")
-                if file_name:
-                    path = os.path.join(self.workflow_dir, file_name)
-                    if os.path.exists(path):
-                        return file_name
-
-        files = self.get_files(category)
-        return files[0] if files else None
-
-    # ------------------------------------------------------------------ #
-    # Raw config helpers (used by Settings tab)
-    # ------------------------------------------------------------------ #
     def read_raw(self) -> str:
+        """Read raw preset JSON content."""
         if not os.path.exists(self.config_path):
             return json.dumps({"categories": {}}, indent=2)
-        with open(self.config_path, "r") as f:
-            return f.read()
+        with open(self.config_path, "r", encoding="utf-8") as handle:
+            return handle.read()
 
     def save_raw(self, content: str) -> str:
+        """Validate and save preset JSON content."""
         try:
             data = json.loads(content)
-            os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
-            with open(self.config_path, "w") as f:
-                json.dump(data, f, indent=2)
-            return "**✅ Gespeichert:** workflow_presets.json aktualisiert."
-        except json.JSONDecodeError as exc:
-            return f"**❌ Fehler:** Ungültiges JSON ({exc})"
+        except json.JSONDecodeError:
+            return "❌ Fehler: Ungültiges JSON"
+
+        os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, indent=2, ensure_ascii=False)
+            display_name = "workflow_presets.json"
+            return f"✅ Gespeichert: {display_name}"
         except Exception as exc:
-            return f"**❌ Fehler:** Konnte workflow_presets.json nicht speichern ({exc})"
+            display_name = "workflow_presets.json"
+            return f"❌ Fehler: Konnte {display_name} nicht speichern ({exc})"
 
-    def has_preset_file(self) -> bool:
-        """Check if the workflow presets file exists."""
-        return os.path.exists(self.config_path)
+    # -----------------------------
+    # Compatibility dispatchers
+    # -----------------------------
+    def get_files(self, prefix: Optional[str] = None, category: Optional[str] = None) -> List[str]:
+        """Get workflow files by prefix (new) or category (legacy)."""
+        if prefix in ALL_PREFIXES:
+            return self._get_files_by_prefix(prefix)
 
-    def get_status(self) -> Dict[str, Any]:
-        """Get status information about the workflow registry."""
-        has_file = self.has_preset_file()
-        presets = self._load_presets()
-        categories = presets.get("categories", {})
+        if category is None and prefix:
+            category = prefix
+        return self._get_files_from_presets(category)
 
-        return {
-            "preset_file_exists": has_file,
-            "preset_file_path": self.config_path,
-            "workflow_dir": self.workflow_dir,
-            "workflow_dir_exists": os.path.exists(self.workflow_dir),
-            "category_count": len(categories),
-            "categories": list(categories.keys()),
-        }
+    def get_default(self, prefix: Optional[str] = None, category: Optional[str] = None) -> Optional[str]:
+        """Get default workflow for prefix (new) or category (legacy)."""
+        if prefix in ALL_PREFIXES:
+            return self._get_default_by_prefix(prefix)
+
+        if category is None and prefix:
+            category = prefix
+
+        presets = self.get_presets(category=category)
+        if not presets:
+            files = self._get_files_from_presets(category)
+            return files[0] if files else None
+
+        # Find marked default
+        for entry in presets:
+            if entry.get("default"):
+                filename = entry.get("file")
+                if filename and os.path.exists(os.path.join(self.workflow_dir, filename)):
+                    return filename
+
+        # Fallback to first available file
+        files = self._get_files_from_presets(category)
+        return files[0] if files else None
 
 
-__all__ = ["WorkflowRegistry"]
+__all__ = [
+    "WorkflowRegistry",
+    "PREFIX_KEYFRAME",
+    "PREFIX_KEYFRAME_LORA",
+    "PREFIX_VIDEO",
+    "PREFIX_VIDEO_FIRSTLAST",
+    "PREFIX_LIPSYNC",
+    "ALL_PREFIXES",
+]

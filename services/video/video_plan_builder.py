@@ -1,4 +1,4 @@
-"""Video plan builder: split shots into segments and build generation plan."""
+"""Video plan builder: create generation plan from storyboard and selections."""
 import math
 import os
 from typing import List, Optional
@@ -8,33 +8,64 @@ from infrastructure.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Default constants for segment calculation
+DEFAULT_MAX_FRAMES = 73  # Maximum frames per WAN segment
+DEFAULT_FPS = 24  # Default frames per second
+
 
 class VideoPlanBuilder:
-    """Build video generation plans with automatic segmentation for long shots."""
+    """Build video generation plans from storyboard and keyframe selections.
 
-    def __init__(self, max_segment_seconds: float = 3.0):
+    Creates plan entries per shot, splitting longer shots into multiple segments.
+    For shots longer than one segment duration (max_frames / fps), the system
+    uses last-frame-to-first-frame chaining to extend videos seamlessly.
+    """
+
+    def __init__(
+        self,
+        max_frames: int = DEFAULT_MAX_FRAMES,
+        fps: int = DEFAULT_FPS,
+    ):
         """
         Initialize the plan builder.
 
         Args:
-            max_segment_seconds: Maximum duration per segment (default: 3.0s)
+            max_frames: Maximum frames per video segment (default: 73)
+            fps: Frames per second for duration calculation (default: 24)
         """
-        self.max_segment_seconds = max_segment_seconds
+        self.max_frames = max_frames
+        self.fps = fps
 
-    def build(self, storyboard: Storyboard, selection: SelectionSet) -> GenerationPlan:
+    @property
+    def segment_duration(self) -> float:
+        """Calculate maximum duration per segment based on frames and fps."""
+        return self.max_frames / self.fps
+
+    def build(
+        self,
+        storyboard: Storyboard,
+        selection: SelectionSet,
+        fps: Optional[int] = None,
+    ) -> GenerationPlan:
         """
         Build a generation plan from storyboard and keyframe selections.
 
-        For shots longer than max_segment_seconds, automatically splits into
-        multiple segments with LastFrame chaining.
+        Splits shots into multiple segments if duration exceeds segment_duration.
+        First segment uses the keyframe, subsequent segments will use the
+        last frame from the previous segment (chaining).
 
         Args:
             storyboard: Loaded storyboard with shot definitions
             selection: Selected keyframes from Phase 2
+            fps: Override FPS for this build (uses instance default if None)
 
         Returns:
             GenerationPlan with all segments ready for execution
         """
+        # Use provided fps or instance default
+        effective_fps = fps or self.fps
+        segment_duration = self.max_frames / effective_fps
+
         selection_map = {entry.shot_id: entry for entry in selection.selections}
         segments: List[PlanSegment] = []
 
@@ -54,81 +85,138 @@ class VideoPlanBuilder:
                 continue
 
             # Calculate number of segments needed
-            chain_total = max(1, math.ceil(shot.duration / self.max_segment_seconds))
-            remaining = shot.duration
-            needs_extension = shot.duration > self.max_segment_seconds
+            shot_segments = self._build_shot_segments(
+                shot=shot,
+                selection_entry=selection_entry,
+                start_frame_path=start_frame_path,
+                segment_duration=segment_duration,
+            )
+            segments.extend(shot_segments)
 
-            # Build segment chain
-            for idx in range(chain_total):
-                plan_id = shot.shot_id if idx == 0 else f"{shot.shot_id}{chr(ord('A') + idx)}"
-                filename_base = (
-                    shot.filename_base if idx == 0
-                    else f"{shot.filename_base}_seg{idx + 1:02d}"
-                )
-                clip_name = f"{plan_id}_{shot.filename_base}"
-
-                requested_duration = round(
-                    min(self.max_segment_seconds, remaining if remaining > 0 else self.max_segment_seconds),
-                    2
-                )
-
-                effective_duration = (
-                    min(shot.duration, self.max_segment_seconds)
-                    if chain_total == 1
-                    else self.max_segment_seconds
-                )
-
-                # First segment uses selection startframe, others wait for chain
-                start_frame = start_frame_path if idx == 0 else None
-                start_source = "selection" if idx == 0 else "chain_wait"
-                ready = bool(start_frame) if idx == 0 else False
-                start_frame_source = start_source if (start_frame or idx > 0) else "missing"
-
-                segments.append(
-                    PlanSegment(
-                        plan_id=plan_id,
-                        shot_id=shot.shot_id,
-                        filename_base=filename_base,
-                        prompt=shot.prompt,
-                        width=shot.width,
-                        height=shot.height,
-                        duration=shot.duration,
-                        segment_index=idx + 1,
-                        segment_total=chain_total,
-                        target_duration=requested_duration,
-                        effective_duration=round(effective_duration, 2),
-                        segment_requested_duration=requested_duration,
-                        start_frame=start_frame,
-                        start_frame_source=start_frame_source,
-                        chain_id=shot.shot_id,
-                        wan_motion=shot.wan_motion,
-                        ready=ready,
-                        selected_file=selection_entry.selected_file,
-                        selected_variant=selection_entry.selected_variant,
-                        clip_name=clip_name,
-                        needs_extension=needs_extension,
-                        status="pending",
-                    )
-                )
-                remaining = max(0.0, remaining - self.max_segment_seconds)
-
-        logger.info(f"Built plan: {len(segments)} segments from {len(storyboard.shots)} shots")
+        total_segments = len(segments)
+        shots_with_chaining = sum(1 for s in segments if s.segment_total > 1 and s.segment_index == 1)
+        logger.info(
+            f"Built plan: {total_segments} segments from {len(storyboard.shots)} shots "
+            f"({shots_with_chaining} shots require chaining)"
+        )
         return GenerationPlan(segments=segments)
 
-    def _placeholder_segment(self, shot: Shot, status: str) -> PlanSegment:
+    def _build_shot_segments(
+        self,
+        shot: Shot,
+        selection_entry,
+        start_frame_path: str,
+        segment_duration: float,
+    ) -> List[PlanSegment]:
         """
-        Create placeholder entry for missing startframes/selections.
+        Build all segments for a single shot, splitting if needed.
 
         Args:
-            shot: Shot with missing data
-            status: Status reason (e.g., "no_selection", "startframe_missing")
+            shot: Shot definition
+            selection_entry: Selected keyframe entry
+            start_frame_path: Path to the keyframe image
+            segment_duration: Maximum duration per segment in seconds
 
         Returns:
-            Placeholder PlanSegment
+            List of PlanSegments (1 if no splitting needed, multiple for longer shots)
         """
-        duration = shot.duration
-        target = min(duration, self.max_segment_seconds)
+        # Calculate how many segments are needed
+        num_segments = max(1, math.ceil(shot.duration / segment_duration))
 
+        # If only one segment needed, return simple segment
+        if num_segments == 1:
+            return [
+                PlanSegment(
+                    plan_id=shot.shot_id,
+                    shot_id=shot.shot_id,
+                    filename_base=shot.filename_base,
+                    prompt=shot.prompt,
+                    width=shot.width,
+                    height=shot.height,
+                    duration=shot.duration,
+                    segment_index=1,
+                    segment_total=1,
+                    target_duration=shot.duration,
+                    effective_duration=shot.duration,
+                    segment_requested_duration=shot.duration,
+                    start_frame=start_frame_path,
+                    start_frame_source="selection",
+                    chain_id=shot.shot_id,
+                    wan_motion=shot.wan_motion,
+                    ready=True,
+                    selected_file=selection_entry.selected_file,
+                    selected_variant=selection_entry.selected_variant,
+                    clip_name=f"{shot.shot_id}_{shot.filename_base}",
+                    needs_extension=False,
+                    status="pending",
+                )
+            ]
+
+        # Split into multiple segments
+        segments: List[PlanSegment] = []
+        remaining_duration = shot.duration
+
+        for seg_idx in range(1, num_segments + 1):
+            is_first = seg_idx == 1
+            is_last = seg_idx == num_segments
+
+            # Calculate this segment's duration
+            if is_last:
+                seg_duration = remaining_duration
+            else:
+                seg_duration = min(segment_duration, remaining_duration)
+            remaining_duration -= seg_duration
+
+            # First segment uses keyframe, subsequent use last frame from previous
+            if is_first:
+                seg_start_frame = start_frame_path
+                seg_start_source = "selection"
+                seg_ready = True
+            else:
+                seg_start_frame = None  # Will be set during execution
+                seg_start_source = "chain_wait"
+                seg_ready = False  # Not ready until previous segment completes
+
+            # Unique clip name for each segment
+            suffix = "" if is_first else chr(ord("A") + seg_idx - 1)
+            clip_name = f"{shot.shot_id}{suffix}_{shot.filename_base}"
+            plan_id = shot.shot_id if is_first else f"{shot.shot_id}{suffix}"
+
+            segment = PlanSegment(
+                plan_id=plan_id,
+                shot_id=shot.shot_id,
+                filename_base=shot.filename_base,
+                prompt=shot.prompt,
+                width=shot.width,
+                height=shot.height,
+                duration=seg_duration,
+                segment_index=seg_idx,
+                segment_total=num_segments,
+                target_duration=shot.duration,
+                effective_duration=seg_duration,
+                segment_requested_duration=seg_duration,
+                start_frame=seg_start_frame,
+                start_frame_source=seg_start_source,
+                chain_id=shot.shot_id,
+                wan_motion=shot.wan_motion,
+                ready=seg_ready,
+                selected_file=selection_entry.selected_file if is_first else None,
+                selected_variant=selection_entry.selected_variant if is_first else None,
+                clip_name=clip_name,
+                needs_extension=not is_last,  # All but last segment need extension
+                status="pending",
+            )
+            segments.append(segment)
+
+        logger.info(
+            f"Shot {shot.shot_id}: {shot.duration}s → {num_segments} segments "
+            f"(segment_duration={segment_duration:.2f}s)"
+        )
+        return segments
+
+    def _placeholder_segment(self, shot: Shot, status: str) -> PlanSegment:
+        """Create placeholder segment for missing selection/startframe."""
+        num_segments = max(1, math.ceil(shot.duration / self.segment_duration))
         return PlanSegment(
             plan_id=shot.shot_id,
             shot_id=shot.shot_id,
@@ -136,12 +224,12 @@ class VideoPlanBuilder:
             prompt=shot.prompt,
             width=shot.width,
             height=shot.height,
-            duration=duration,
+            duration=shot.duration,
             segment_index=1,
-            segment_total=max(1, math.ceil(duration / self.max_segment_seconds)),
-            target_duration=target,
-            effective_duration=min(duration, self.max_segment_seconds),
-            segment_requested_duration=target,
+            segment_total=num_segments,
+            target_duration=shot.duration,
+            effective_duration=shot.duration,
+            segment_requested_duration=shot.duration,
             start_frame=None,
             start_frame_source="missing",
             chain_id=shot.shot_id,
@@ -150,9 +238,9 @@ class VideoPlanBuilder:
             selected_file=None,
             selected_variant=None,
             clip_name=f"{shot.shot_id}_{shot.filename_base}",
-            needs_extension=duration > self.max_segment_seconds,
+            needs_extension=num_segments > 1,
             status=status,
         )
 
 
-__all__ = ["VideoPlanBuilder"]
+__all__ = ["VideoPlanBuilder", "DEFAULT_MAX_FRAMES", "DEFAULT_FPS"]

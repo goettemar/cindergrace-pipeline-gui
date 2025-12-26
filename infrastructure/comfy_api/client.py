@@ -321,13 +321,12 @@ class ComfyUIAPI:
                         elif msg_type == "execution_success":
                             success_data = data.get("data", {})
                             success_prompt_id = success_data.get("prompt_id")
-                            if success_prompt_id == prompt_id:
+                            if success_prompt_id in (None, prompt_id):
                                 logger.info(f"Received execution_success for prompt {prompt_id}")
                                 if callback:
                                     callback(1.0, "Generation complete")
                                 break
-                            else:
-                                logger.debug(f"Ignoring execution_success for different prompt {success_prompt_id}")
+                            logger.debug(f"Ignoring execution_success for different prompt {success_prompt_id}")
 
                 except websocket.WebSocketTimeoutException:
                     # Check if job is done via history
@@ -357,6 +356,96 @@ class ComfyUIAPI:
                 "output_images": [],
                 "error": str(e)
             }
+
+    def _monitor_via_polling(
+        self,
+        prompt_id: str,
+        callback: Optional[Callable[[float, str], None]] = None,
+        timeout: int = 300,
+        start_time: float = None,
+        poll_interval: float = 3.0
+    ) -> Dict[str, Any]:
+        """
+        Monitor job progress via HTTP polling (fallback for unstable WebSocket).
+
+        Args:
+            prompt_id: Job ID to monitor
+            callback: Optional callback(progress_pct, status_text)
+            timeout: Timeout in seconds
+            start_time: Start time (for continuing from WebSocket failure)
+            poll_interval: Seconds between polls
+
+        Returns:
+            Dictionary with status, output_images, error
+        """
+        if start_time is None:
+            start_time = time.time()
+
+        if callback:
+            callback(0.3, "Polling for completion...")
+
+        while True:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                return {
+                    "status": "error",
+                    "output_images": [],
+                    "error": f"Timeout after {timeout}s waiting for completion"
+                }
+
+            # Check history for completion
+            try:
+                history = self.get_history(prompt_id)
+                if history:
+                    # Job completed
+                    logger.info(f"Job {prompt_id} completed (detected via polling)")
+                    if callback:
+                        callback(1.0, "Generation complete")
+
+                    output_images = self.get_output_images(prompt_id, retries=5, delay=1.0)
+                    return {
+                        "status": "success",
+                        "output_images": output_images,
+                        "error": None
+                    }
+            except Exception as e:
+                logger.debug(f"Polling check failed: {e}")
+
+            # Check queue status
+            try:
+                queue = self._get_request("/queue")
+                running = queue.get("queue_running", [])
+                pending = queue.get("queue_pending", [])
+
+                # Check if our job is still in queue
+                job_in_queue = any(
+                    item[1] == prompt_id
+                    for item in running + pending
+                )
+
+                if job_in_queue:
+                    progress = min(0.3 + (elapsed / timeout) * 0.6, 0.9)
+                    if callback:
+                        callback(progress, f"Processing... ({int(elapsed)}s)")
+                else:
+                    # Job not in queue - check history one more time
+                    history = self.get_history(prompt_id)
+                    if history:
+                        logger.info(f"Job {prompt_id} completed")
+                        if callback:
+                            callback(1.0, "Generation complete")
+
+                        output_images = self.get_output_images(prompt_id, retries=5, delay=1.0)
+                        return {
+                            "status": "success",
+                            "output_images": output_images,
+                            "error": None
+                        }
+
+            except Exception as e:
+                logger.debug(f"Queue check failed: {e}")
+
+            time.sleep(poll_interval)
 
     def get_output_images(self, prompt_id: str, retries: int = 0, delay: float = 0.5) -> List[str]:
         """

@@ -171,6 +171,39 @@ class HunyuanVideoSamplerUpdater(NodeUpdater):
                     inputs[key] = frames
 
 
+class LoraLoaderUpdater(NodeUpdater):
+    """Update LoraLoader nodes for character LoRAs.
+
+    Params:
+        lora_name: LoRA filename (e.g., "elena.safetensors") or "none" to disable
+        lora_strength_model: Model strength (default 0.85)
+        lora_strength_clip: CLIP strength (default 0.85)
+        lora_strength: Combined strength for both model and clip
+    """
+    target_types = ("LoraLoader", "LoraLoaderModelOnly")
+
+    def update(self, node_data: Dict[str, Any], params: Dict[str, Any]) -> None:
+        lora_name = params.get("lora_name")
+        if lora_name is None:
+            return
+
+        inputs = node_data.setdefault("inputs", {})
+
+        # Set LoRA filename
+        if "lora_name" in inputs:
+            inputs["lora_name"] = lora_name
+
+        # Set strengths
+        strength = params.get("lora_strength")
+        strength_model = _merge_params(params.get("lora_strength_model"), strength)
+        strength_clip = _merge_params(params.get("lora_strength_clip"), strength)
+
+        if strength_model is not None and "strength_model" in inputs:
+            inputs["strength_model"] = float(strength_model)
+        if strength_clip is not None and "strength_clip" in inputs:
+            inputs["strength_clip"] = float(strength_clip)
+
+
 class GenericSeedUpdater(NodeUpdater):
     """Safety net to push seed into any node exposing seed/noise_seed."""
 
