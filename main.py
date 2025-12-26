@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import gradio as gr
 from addons import load_addons
+from addons.components import create_log_panel
 from infrastructure.logger import get_logger, PipelineLogger
 from infrastructure.config_manager import ConfigManager
 
@@ -60,44 +61,112 @@ def create_gui():
     }
     """
 
+    # Check if first run
+    config = ConfigManager()
+    is_first_run = config.is_first_run()
+
+    # Get active backend info
+    active_backend = config.get_active_backend()
+    backend_name = active_backend.get("name", "Lokal")
+    backend_type = active_backend.get("type", "local")
+    backend_icon = "☁️" if backend_type == "remote" else "🖥️"
+    backend_color = "#4CAF50" if backend_type == "local" else "#2196F3"
+
     with gr.Blocks(title="CINDERGRACE Pipeline Control") as demo:
-        # Header
+        # Header with backend indicator
         with gr.Row():
             with gr.Column():
-                gr.HTML("""
+                gr.HTML(f"""
                 <div class="header">
                     <h1>🎬 CINDERGRACE</h1>
                     <p>Automated Video Production Pipeline</p>
+                    <div style="
+                        display: inline-block;
+                        margin-top: 10px;
+                        padding: 4px 12px;
+                        background: {backend_color};
+                        border-radius: 16px;
+                        font-size: 0.85em;
+                        opacity: 0.95;
+                    ">
+                        {backend_icon} Backend: {backend_name}
+                    </div>
                 </div>
                 """)
 
-        # Separate addons by category
-        pipeline_addons = [a for a in addons if a.category == "pipeline"]
-        tool_addons = [a for a in addons if a.category == "tools"]
+        # First-run banner (prominent)
+        if is_first_run:
+            with gr.Row():
+                gr.HTML("""
+                <div style="
+                    background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+                    color: white;
+                    padding: 20px 24px;
+                    border-radius: 12px;
+                    margin: 10px 0 20px 0;
+                    box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
+                ">
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <span style="font-size: 2.5em;">🚀</span>
+                        <div>
+                            <h3 style="margin: 0 0 8px 0; font-size: 1.3em;">Willkommen bei CINDERGRACE!</h3>
+                            <p style="margin: 0; opacity: 0.95;">
+                                Es sieht so aus, als wäre dies Ihr erster Start.<br>
+                                Bitte öffnen Sie den <strong>Setup</strong> Tab um Ihr System zu konfigurieren.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                """)
 
-        # Create tabs for each addon
+        # Flat tabs - all addons in one row
         with gr.Tabs():
-            # Pipeline addons as top-level tabs
-            for addon in pipeline_addons:
+            for addon in addons:
                 with gr.Tab(addon.get_tab_name()):
                     addon.render()
 
-            # Tool addons grouped under Tools tab with sub-tabs
-            if tool_addons:
-                with gr.Tab("🔧 Tools"):
-                    gr.Markdown("## ComfyUI Tools & Utilities")
-                    with gr.Tabs():
-                        for addon in tool_addons:
-                            with gr.Tab(addon.get_tab_name()):
-                                addon.render()
+        # Global log panel (below tabs)
+        create_log_panel(lines=20, auto_refresh=True)
 
         # Footer
         gr.Markdown("""
         ---
-        **CINDERGRACE Pipeline Control** • Version 0.5.1 • [Documentation](../GUI_FRAMEWORK_README.md)
+        **CINDERGRACE Pipeline Control** • Version 0.6.1 • [Documentation](../GUI_FRAMEWORK_README.md)
         """)
 
     return demo
+
+
+def _validate_storyboard_on_startup(config: ConfigManager) -> None:
+    """Check if current_storyboard exists, fix if needed."""
+    from infrastructure.project_store import ProjectStore
+
+    current_sb = config.get_current_storyboard()
+
+    # If no storyboard set or file exists, nothing to do
+    if not current_sb:
+        return
+    if os.path.exists(current_sb):
+        return
+
+    # Storyboard file missing - try to find one in the active project
+    logger.warning(f"Storyboard nicht gefunden: {current_sb}")
+
+    try:
+        store = ProjectStore(config)
+        project = store.get_active_project(refresh=True)
+
+        if project:
+            # Trigger storyboard update for current project
+            store._update_storyboard_for_project(project)
+            config.refresh()
+            new_sb = config.get_current_storyboard()
+            if new_sb and os.path.exists(new_sb):
+                logger.info(f"Storyboard korrigiert: {new_sb}")
+            else:
+                logger.warning("Kein gültiges Storyboard im Projekt gefunden")
+    except Exception as e:
+        logger.warning(f"Konnte Storyboard nicht automatisch korrigieren: {e}")
 
 
 def main():
@@ -106,6 +175,9 @@ def main():
     logger.info("CINDERGRACE GUI starting...")
     config = ConfigManager()
     config.refresh()
+
+    # Validate storyboard path on startup
+    _validate_storyboard_on_startup(config)
 
     # Create GUI
     demo = create_gui()
@@ -139,12 +211,27 @@ def main():
     }
     """
 
-    # Allow Gradio to serve files from ComfyUI output (project folders)
-    comfy_root = config.get_comfy_root()
+    # Allow Gradio to serve files from ComfyUI output and project folders
     allowed_paths = []
+
+    # Add ComfyUI output directory
+    comfy_root = config.get_comfy_root()
     if comfy_root:
-        output_path = os.path.join(os.path.expanduser(comfy_root), "output")
-        allowed_paths.append(output_path)
+        comfy_root = os.path.expanduser(comfy_root)
+        output_path = os.path.join(comfy_root, "output")
+        if os.path.isdir(output_path):
+            allowed_paths.append(output_path)
+            logger.info(f"Allowed path: {output_path}")
+
+    # Also allow all backend output directories
+    for backend_id, backend in config.get_backends().items():
+        backend_root = backend.get("comfy_root", "")
+        if backend_root:
+            backend_root = os.path.expanduser(backend_root)
+            backend_output = os.path.join(backend_root, "output")
+            if os.path.isdir(backend_output) and backend_output not in allowed_paths:
+                allowed_paths.append(backend_output)
+                logger.info(f"Allowed path (backend {backend_id}): {backend_output}")
 
     # Enable queue for long-running operations (video generation can take 10+ minutes)
     demo.queue(default_concurrency_limit=1)

@@ -2,6 +2,7 @@
 import sys
 import os
 import json
+import sqlite3
 from pathlib import Path
 import pytest
 from unittest.mock import Mock, MagicMock
@@ -9,6 +10,34 @@ from unittest.mock import Mock, MagicMock
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+
+@pytest.fixture(autouse=True)
+def reset_settings_store():
+    """Reset the SettingsStore singleton and clear settings before each test.
+
+    This ensures tests don't affect each other via the singleton.
+    """
+    import infrastructure.settings_store as ss
+
+    # Reset the singleton
+    ss._settings_store = None
+
+    yield
+
+    # Clean up after test - clear all settings except internal ones
+    if ss._settings_store is not None:
+        try:
+            conn = sqlite3.connect(ss._settings_store.db_path)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM settings WHERE key NOT LIKE '\\_%' ESCAPE '\\'")
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    # Reset singleton again
+    ss._settings_store = None
 
 
 # ============================================================================

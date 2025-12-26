@@ -155,6 +155,34 @@ class InputValidationError(ValidationError):
     pass
 
 
+# ========================================
+# External API Errors
+# ========================================
+
+class ExternalAPIError(PipelineException):
+    """Base exception for external API errors"""
+    pass
+
+
+class OpenRouterAPIError(ExternalAPIError):
+    """Raised when OpenRouter API call fails"""
+
+    def __init__(self, message: str, status_code: int = None, response_body: str = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_body = response_body
+
+
+class OpenRouterAuthError(OpenRouterAPIError):
+    """Raised when OpenRouter authentication fails (invalid API key)"""
+    pass
+
+
+class OpenRouterRateLimitError(OpenRouterAPIError):
+    """Raised when OpenRouter rate limit is exceeded"""
+    pass
+
+
 __all__ = [
     # Base
     "PipelineException",
@@ -189,4 +217,9 @@ __all__ = [
     # Validation
     "ValidationError",
     "InputValidationError",
+    # External API
+    "ExternalAPIError",
+    "OpenRouterAPIError",
+    "OpenRouterAuthError",
+    "OpenRouterRateLimitError",
 ]

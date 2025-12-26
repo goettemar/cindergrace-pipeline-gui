@@ -7,7 +7,6 @@
   "theme": "default",
   "auto_save_results": true,
   "max_concurrent_jobs": 1,
-  "current_project": "",
   "current_storyboard": "",
   "global_resolution": "540p_landscape",
   "video_initial_wait": 60,

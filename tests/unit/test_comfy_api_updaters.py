@@ -11,6 +11,8 @@ from infrastructure.comfy_api.updaters import (
     WanImageToVideoUpdater,
     LoadImageUpdater,
     HunyuanVideoSamplerUpdater,
+    DiffusionModelUpdater,
+    LoraLoaderUpdater,
     GenericSeedUpdater,
     default_updaters,
     _merge_params,
@@ -575,6 +577,100 @@ class TestGenericSeedUpdater:
         assert node_data["inputs"]["noise_seed"] == 6666
 
 
+class TestDiffusionModelUpdater:
+    """Test DiffusionModelUpdater with [MODEL] title convention"""
+
+    @pytest.mark.unit
+    def test_updates_main_slot(self):
+        """Should update node with [MODEL] marker"""
+        # Arrange
+        updater = DiffusionModelUpdater()
+        node_data = {
+            "inputs": {"unet_name": "old_model.safetensors"},
+            "class_type": "UNETLoader",
+            "_meta": {"title": "[MODEL] Load Diffusion Model"}
+        }
+        params = {"model": "new_model.safetensors"}
+
+        # Act
+        updater.update(node_data, params)
+
+        # Assert
+        assert node_data["inputs"]["unet_name"] == "new_model.safetensors"
+
+    @pytest.mark.unit
+    def test_updates_high_slot(self):
+        """Should update node with [MODEL:high] marker"""
+        # Arrange
+        updater = DiffusionModelUpdater()
+        node_data = {
+            "inputs": {"unet_name": "old_high.gguf"},
+            "class_type": "UnetLoaderGGUF",
+            "_meta": {"title": "[MODEL:high] Unet Loader (GGUF)"}
+        }
+        params = {"model_high": "new_high.gguf", "model_low": "new_low.gguf"}
+
+        # Act
+        updater.update(node_data, params)
+
+        # Assert
+        assert node_data["inputs"]["unet_name"] == "new_high.gguf"
+
+    @pytest.mark.unit
+    def test_updates_low_slot(self):
+        """Should update node with [MODEL:low] marker"""
+        # Arrange
+        updater = DiffusionModelUpdater()
+        node_data = {
+            "inputs": {"unet_name": "old_low.gguf"},
+            "class_type": "UnetLoaderGGUF",
+            "_meta": {"title": "[MODEL:low] Unet Loader (GGUF)"}
+        }
+        params = {"model_high": "new_high.gguf", "model_low": "new_low.gguf"}
+
+        # Act
+        updater.update(node_data, params)
+
+        # Assert
+        assert node_data["inputs"]["unet_name"] == "new_low.gguf"
+
+    @pytest.mark.unit
+    def test_ignores_node_without_marker(self):
+        """Should not update node without [MODEL] marker"""
+        # Arrange
+        updater = DiffusionModelUpdater()
+        node_data = {
+            "inputs": {"unet_name": "should_stay.safetensors"},
+            "class_type": "UNETLoader",
+            "_meta": {"title": "Load Diffusion Model"}  # No [MODEL] marker
+        }
+        params = {"model": "should_not_change.safetensors"}
+
+        # Act
+        updater.update(node_data, params)
+
+        # Assert
+        assert node_data["inputs"]["unet_name"] == "should_stay.safetensors"
+
+    @pytest.mark.unit
+    def test_ignores_when_no_model_param(self):
+        """Should not update when model param is missing"""
+        # Arrange
+        updater = DiffusionModelUpdater()
+        node_data = {
+            "inputs": {"unet_name": "original.safetensors"},
+            "class_type": "UNETLoader",
+            "_meta": {"title": "[MODEL] Load Diffusion Model"}
+        }
+        params = {"other_param": "value"}
+
+        # Act
+        updater.update(node_data, params)
+
+        # Assert
+        assert node_data["inputs"]["unet_name"] == "original.safetensors"
+
+
 class TestDefaultUpdaters:
     """Test default_updaters factory"""
 
@@ -585,7 +681,7 @@ class TestDefaultUpdaters:
         updaters = list(default_updaters())
 
         # Assert
-        assert len(updaters) == 11
+        assert len(updaters) == 13
         assert isinstance(updaters[0], CLIPTextEncodeUpdater)
         assert isinstance(updaters[1], SaveImageUpdater)
         assert isinstance(updaters[2], SaveVideoUpdater)
@@ -596,4 +692,6 @@ class TestDefaultUpdaters:
         assert isinstance(updaters[7], WanImageToVideoUpdater)
         assert isinstance(updaters[8], LoadImageUpdater)
         assert isinstance(updaters[9], HunyuanVideoSamplerUpdater)
-        assert isinstance(updaters[10], GenericSeedUpdater)
+        assert isinstance(updaters[10], DiffusionModelUpdater)
+        assert isinstance(updaters[11], LoraLoaderUpdater)
+        assert isinstance(updaters[12], GenericSeedUpdater)

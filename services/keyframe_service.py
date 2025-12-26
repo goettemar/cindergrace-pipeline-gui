@@ -10,6 +10,7 @@ from infrastructure.comfy_api import ComfyUIAPI
 from infrastructure.logger import get_logger
 from domain.models import Storyboard
 from services.character_lora_service import CharacterLoraService
+from services.cleanup_service import CleanupService
 
 # Import from keyframe package
 from services.keyframe import (
@@ -77,6 +78,7 @@ class KeyframeGenerationService:
         self._file_handler = KeyframeFileHandler(project_store)
         self._checkpoint_handler = CheckpointHandler(project_store)
         self._lora_resolver = LoraParamsResolver(self.character_lora_service)
+        self._cleanup_service = CleanupService(project_store)
 
     def _format_progress(self, checkpoint: Dict[str, Any], total_shots: int) -> str:
         """Backward-compatible wrapper for progress formatting."""
@@ -128,6 +130,11 @@ class KeyframeGenerationService:
                 yield [], f"**❌ Error:** Connection failed - {conn_result['error']}", \
                       "Connection failed", checkpoint, "Error"
                 return
+
+            # Cleanup old files before starting
+            cleanup_count = self._cleanup_service.cleanup_before_keyframe_generation(project)
+            if cleanup_count > 0:
+                logger.info(f"Pre-generation cleanup: {cleanup_count} file(s) archived")
 
             # Load workflow template
             workflow_path = os.path.join(self.config.get_workflow_dir(), workflow_file)

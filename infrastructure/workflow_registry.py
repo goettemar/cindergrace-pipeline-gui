@@ -53,7 +53,7 @@ class WorkflowRegistry:
             prefix: Filename prefix to filter (e.g., 'gcp_', 'gcv_', 'gcl_')
 
         Returns:
-            Sorted list of matching workflow filenames
+            Sorted list of matching workflow filenames (excludes _sage.json variants)
         """
         if not os.path.exists(self.workflow_dir):
             logger.warning(f"Workflow-Verzeichnis nicht gefunden: {self.workflow_dir}")
@@ -62,6 +62,9 @@ class WorkflowRegistry:
         workflows = []
         for filename in os.listdir(self.workflow_dir):
             if filename.startswith(prefix) and filename.endswith(".json"):
+                # Skip _sage.json variants - they are auto-selected based on config
+                if filename.endswith("_sage.json"):
+                    continue
                 workflows.append(filename)
 
         workflows.sort()
@@ -78,16 +81,15 @@ class WorkflowRegistry:
         Returns:
             List of workflow filenames
         """
-        # Try to get from cache
-        cached = self.settings_store.get_workflow_list(prefix)
-        if cached:
-            return cached
+        # Try to get from cache - check if prefix has been scanned before
+        if self.settings_store.has_workflow_cache(prefix):
+            return self.settings_store.get_workflow_list(prefix)
 
         # Cache empty - perform initial scan
         logger.info(f"Kein Workflow-Cache für {prefix} - scanne Filesystem...")
         workflows = self._scan_filesystem(prefix)
-        if workflows:
-            self.settings_store.set_workflow_list(prefix, workflows)
+        # Always save to cache, even if empty (to avoid re-scanning)
+        self.settings_store.set_workflow_list(prefix, workflows)
         return workflows
 
     def rescan(self, prefix: str = None) -> Tuple[int, List[str]]:
@@ -257,6 +259,66 @@ class WorkflowRegistry:
         """
         return self.get_lora_variant(workflow_file) is not None
 
+    def get_sage_variant(self, workflow_file: str) -> Optional[str]:
+        """Get SageAttention variant of a workflow if it exists.
+
+        Converts 'workflow.json' to 'workflow_sage.json' and checks filesystem.
+
+        Args:
+            workflow_file: Original workflow filename (e.g., 'gcv_wan22_14B_i2v_gguf.json')
+
+        Returns:
+            Sage variant filename (e.g., 'gcv_wan22_14B_i2v_gguf_sage.json') if exists, None otherwise
+        """
+        if not workflow_file or not workflow_file.endswith('.json'):
+            return None
+
+        # Insert _sage before .json
+        base_name = workflow_file[:-5]  # Remove .json
+        sage_file = f"{base_name}_sage.json"
+
+        # Check if file exists
+        sage_path = os.path.join(self.workflow_dir, sage_file)
+        if os.path.exists(sage_path):
+            logger.debug(f"SageAttention-Variante gefunden: {sage_file}")
+            return sage_file
+
+        return None
+
+    def has_sage_variant(self, workflow_file: str) -> bool:
+        """Check if a SageAttention variant exists for this workflow.
+
+        Args:
+            workflow_file: Original workflow filename
+
+        Returns:
+            True if *_sage.json variant exists
+        """
+        return self.get_sage_variant(workflow_file) is not None
+
+    def resolve_workflow(self, workflow_file: str, use_sage: bool = False) -> str:
+        """Resolve actual workflow file based on preferences.
+
+        If use_sage is True and a _sage.json variant exists, returns that.
+        Otherwise returns the original workflow file.
+
+        Args:
+            workflow_file: Base workflow filename
+            use_sage: Whether to prefer SageAttention variant
+
+        Returns:
+            Resolved workflow filename (original or _sage variant)
+        """
+        if use_sage:
+            sage_variant = self.get_sage_variant(workflow_file)
+            if sage_variant:
+                logger.info(f"Verwende SageAttention-Workflow: {sage_variant}")
+                return sage_variant
+            else:
+                logger.debug(f"Keine SageAttention-Variante für {workflow_file}")
+
+        return workflow_file
+
     def get_status(self) -> dict:
         """Get status information about the workflow registry.
 
@@ -298,13 +360,42 @@ class WorkflowRegistry:
         Returns:
             List of model paths (relative to ComfyUI/models/), empty if no .models file
         """
+        slot_models = self.get_compatible_models_by_slot(workflow_file)
+        # Flatten all slots to a simple list for backward compatibility
+        models = []
+        for slot_list in slot_models.values():
+            models.extend(slot_list)
+        return models
+
+    def get_compatible_models_by_slot(self, workflow_file: str) -> Dict[str, List[str]]:
+        """Parse .models sidecar file with slot support.
+
+        Supports slot syntax for multi-model workflows:
+            # Main/default slot (no prefix or [main])
+            diffusion_models/model.safetensors
+
+            # Named slots
+            [high]
+            diffusion_models/model_high.gguf
+
+            [low]
+            diffusion_models/model_low.gguf
+
+        Args:
+            workflow_file: Workflow filename
+
+        Returns:
+            Dict mapping slot names to model lists. "" key = main/default slot.
+        """
         models_path = self.get_models_file_path(workflow_file)
 
         if not os.path.exists(models_path):
             logger.debug(f"Keine .models Datei für {workflow_file}")
-            return []
+            return {}
 
-        models = []
+        result: Dict[str, List[str]] = {"": []}  # "" = main slot
+        current_slot = ""
+
         try:
             with open(models_path, 'r', encoding='utf-8') as f:
                 for line in f:
@@ -312,13 +403,30 @@ class WorkflowRegistry:
                     # Skip empty lines and comments
                     if not line or line.startswith('#'):
                         continue
-                    models.append(line)
 
-            logger.info(f"Geladene kompatible Modelle für {workflow_file}: {len(models)}")
-            return models
+                    # Check for slot marker [name]
+                    if line.startswith('[') and line.endswith(']'):
+                        slot_name = line[1:-1].lower()
+                        if slot_name == "main":
+                            current_slot = ""
+                        else:
+                            current_slot = slot_name
+                        if current_slot not in result:
+                            result[current_slot] = []
+                        continue
+
+                    # Add model to current slot
+                    result[current_slot].append(line)
+
+            # Remove empty slots
+            result = {k: v for k, v in result.items() if v}
+
+            total = sum(len(v) for v in result.values())
+            logger.info(f"Geladene kompatible Modelle für {workflow_file}: {total} in {len(result)} Slot(s)")
+            return result
         except Exception as e:
             logger.error(f"Fehler beim Lesen von {models_path}: {e}")
-            return []
+            return {}
 
     def get_available_compatible_models(
         self,
@@ -353,6 +461,54 @@ class WorkflowRegistry:
 
         logger.info(f"Verfügbare kompatible Modelle: {len(available)} von {len(compatible)}")
         return available
+
+    def get_available_compatible_models_by_slot(
+        self,
+        workflow_file: str,
+        comfy_models_dir: str
+    ) -> Dict[str, List[Tuple[str, str]]]:
+        """Get available models organized by slot.
+
+        Args:
+            workflow_file: Workflow filename
+            comfy_models_dir: Path to ComfyUI/models directory
+
+        Returns:
+            Dict mapping slot names to lists of (display_name, relative_path) tuples.
+            "" key = main/default slot.
+        """
+        slot_models = self.get_compatible_models_by_slot(workflow_file)
+
+        if not slot_models:
+            return {}
+
+        result: Dict[str, List[Tuple[str, str]]] = {}
+        for slot, models in slot_models.items():
+            available = []
+            for model_path in models:
+                full_path = os.path.join(comfy_models_dir, model_path)
+                if os.path.exists(full_path):
+                    filename = os.path.basename(model_path)
+                    display_name = filename.rsplit('.', 1)[0]
+                    available.append((display_name, model_path))
+                else:
+                    logger.debug(f"Kompatibles Modell nicht verfügbar: {model_path}")
+            if available:
+                result[slot] = available
+
+        return result
+
+    def get_slot_names(self, workflow_file: str) -> List[str]:
+        """Get list of model slot names defined in .models file.
+
+        Args:
+            workflow_file: Workflow filename
+
+        Returns:
+            List of slot names ([""] for single-slot, ["high", "low"] for multi-slot, etc.)
+        """
+        slot_models = self.get_compatible_models_by_slot(workflow_file)
+        return list(slot_models.keys())
 
     def has_models_file(self, workflow_file: str) -> bool:
         """Check if a .models sidecar file exists for this workflow.

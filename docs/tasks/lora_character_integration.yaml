@@ -1,0 +1,270 @@
+# Character LoRA Integration - Architecture & Implementation Plan
+# Created: 2025-12-16
+# Status: In Progress
+# Version: v0.7.0
+
+task_id: lora_character_integration
+goal: |
+  Character LoRAs im Storyboard definieren und automatisch im Keyframe Generator
+  in den ComfyUI Workflow injizieren. Der Storyboard Editor scannt verfügbare
+  LoRAs und bietet sie zur Auswahl an.
+
+# =============================================================================
+# ARCHITECTURE
+# =============================================================================
+
+architecture:
+  overview: |
+    ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+    │ Character LoRA  │────▶│ Storyboard       │────▶│ Keyframe        │
+    │ Ordner          │     │ Editor           │     │ Generator       │
+    │ *.safetensors   │     │ (Character-Tab)  │     │ (LoRA Inject)   │
+    └─────────────────┘     └──────────────────┘     └─────────────────┘
+           │                        │                        │
+           ▼                        ▼                        ▼
+    ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+    │ CharacterLora   │     │ Storyboard v2.1  │     │ ComfyUI API     │
+    │ Service         │     │ characters: []   │     │ LoraLoader      │
+    │ (Scan + CRUD)   │     │ shot.characters  │     │ Node Update     │
+    └─────────────────┘     └──────────────────┘     └─────────────────┘
+
+  lora_directory:
+    path: "<ComfyUI>/output/character/"
+    config_key: "character_lora_dir"
+    fallback: "<ComfyUI>/models/loras/"
+
+  naming_convention:
+    pattern: "<character_name>.safetensors"
+    examples:
+      - "elena.safetensors"        # → trigger_word: "elena"
+      - "marco_knight.safetensors" # → trigger_word: "marco_knight"
+      - "cindergrace.safetensors"  # → trigger_word: "cindergrace"
+    rules:
+      - Dateiname (ohne .safetensors) = Character ID = Trigger Word
+      - Kleinbuchstaben, Unterstriche erlaubt
+      - Keine Leerzeichen, keine Sonderzeichen
+
+# =============================================================================
+# DATA MODELS
+# =============================================================================
+
+data_models:
+  character_lora:
+    description: "Represents a character LoRA file"
+    fields:
+      id: "string - derived from filename (e.g., 'elena')"
+      name: "string - display name (e.g., 'Elena')"
+      trigger_word: "string - same as id (e.g., 'elena')"
+      lora_file: "string - filename (e.g., 'elena.safetensors')"
+      lora_path: "string - full path to file"
+      strength: "float - default 0.85, range 0.0-1.5"
+
+  storyboard_v21:
+    description: "Extended storyboard format with character support"
+    new_fields:
+      characters:
+        type: "array of character references"
+        scope: "project-level - available characters"
+        example:
+          - id: "elena"
+            strength: 0.85
+          - id: "marco_knight"
+            strength: 0.8
+
+      shot.characters:
+        type: "array of character ids"
+        scope: "shot-level - characters in this shot"
+        example: ["elena", "marco_knight"]
+
+# =============================================================================
+# STORYBOARD FORMAT v2.1
+# =============================================================================
+
+storyboard_format:
+  version: "2.1"
+  example: |
+    {
+      "project": "Musikvideo Elena",
+      "version": "2.1",
+
+      "characters": [
+        {
+          "id": "elena",
+          "strength": 0.85
+        },
+        {
+          "id": "marco_knight",
+          "strength": 0.8
+        }
+      ],
+
+      "shots": [
+        {
+          "shot_id": "001",
+          "filename_base": "elena-closeup",
+          "prompt": "elena portrait, dramatic lighting, cinematic",
+          "characters": ["elena"],
+          "width": 1024,
+          "height": 576,
+          "duration": 3.0
+        },
+        {
+          "shot_id": "002",
+          "filename_base": "both-meeting",
+          "prompt": "elena and marco_knight standing together, epic scene",
+          "characters": ["elena", "marco_knight"],
+          "width": 1024,
+          "height": 576,
+          "duration": 4.0
+        }
+      ]
+    }
+
+  notes:
+    - Trigger words sollten im Prompt enthalten sein
+    - Bei mehreren Characters werden mehrere LoRAs geladen
+    - Strength kann pro Storyboard überschrieben werden (default aus Service)
+
+# =============================================================================
+# IMPLEMENTATION TASKS
+# =============================================================================
+
+implementation:
+  phase_1_service:
+    task: "CharacterLoraService erstellen"
+    files:
+      - path: "services/character_lora_service.py"
+        description: "Service für LoRA Scan und Verwaltung"
+        methods:
+          - "scan_loras() -> List[CharacterLora]"
+          - "get_lora(id: str) -> Optional[CharacterLora]"
+          - "get_lora_choices() -> List[Tuple[str, str]]"
+          - "validate_characters(ids: List[str]) -> bool"
+    acceptance:
+      - Scannt <ComfyUI>/output/character/ nach .safetensors
+      - Extrahiert Character-ID aus Dateiname
+      - Liefert Liste für Gradio Dropdown
+
+  phase_2_storyboard:
+    task: "Storyboard Format erweitern"
+    files:
+      - path: "domain/models.py"
+        changes:
+          - "CharacterReference dataclass hinzufügen"
+          - "Storyboard.characters Feld hinzufügen"
+          - "Shot.characters Feld hinzufügen"
+      - path: "domain/storyboard_service.py"
+        changes:
+          - "Character-Validierung beim Laden"
+          - "Backwards-compatible zu v2.0"
+    acceptance:
+      - v2.0 Storyboards laden weiterhin
+      - v2.1 Storyboards mit Characters laden
+      - Warnung wenn LoRA nicht gefunden
+
+  phase_3_editor:
+    task: "Storyboard Editor erweitern"
+    files:
+      - path: "addons/storyboard_editor.py"
+        changes:
+          - "Character-Dropdown pro Shot"
+          - "Multi-Select für mehrere Characters"
+          - "Strength-Slider (optional, advanced)"
+      - path: "services/storyboard_editor_service.py"
+        changes:
+          - "Character-Feld beim Speichern"
+    acceptance:
+      - Dropdown zeigt alle verfügbaren LoRAs
+      - Mehrere Characters pro Shot auswählbar
+      - Characters werden im Storyboard gespeichert
+
+  phase_4_keyframe:
+    task: "Keyframe Generator: LoRA Injection"
+    files:
+      - path: "infrastructure/comfy_api/updaters.py"
+        changes:
+          - "LoraLoaderUpdater Klasse"
+          - "Support für mehrere LoRAs"
+      - path: "services/keyframe_service.py"
+        changes:
+          - "LoRA aus Storyboard lesen"
+          - "LoRA in Workflow injizieren"
+    acceptance:
+      - LoraLoader Node wird aktualisiert
+      - Mehrere LoRAs werden korrekt geladen
+      - Strength wird korrekt gesetzt
+
+# =============================================================================
+# COMFYUI WORKFLOW REQUIREMENTS
+# =============================================================================
+
+workflow_requirements:
+  lora_loader_node:
+    class_type: "LoraLoader"
+    inputs:
+      model: "from previous node"
+      clip: "from previous node"
+      lora_name: "elena.safetensors"
+      strength_model: 0.85
+      strength_clip: 0.85
+
+  multiple_loras:
+    description: "Für mehrere Characters werden LoraLoader Nodes verkettet"
+    pattern: |
+      Model → LoraLoader(elena) → LoraLoader(marco) → KSampler
+
+  workflow_structure:
+    note: |
+      Der Flux Workflow muss einen LoraLoader Node enthalten.
+      Falls nicht vorhanden, wird er dynamisch eingefügt.
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+configuration:
+  settings_json:
+    new_keys:
+      character_lora_dir:
+        default: "<comfy_root>/output/character"
+        description: "Ordner mit Character LoRA Dateien"
+      default_lora_strength:
+        default: 0.85
+        description: "Standard LoRA Strength"
+
+# =============================================================================
+# RISKS & MITIGATIONS
+# =============================================================================
+
+risks:
+  - risk: "LoRA nicht gefunden"
+    mitigation: "Warnung im UI, Generation ohne LoRA möglich"
+
+  - risk: "Workflow hat keinen LoraLoader Node"
+    mitigation: "Node dynamisch einfügen oder Fehlermeldung"
+
+  - risk: "Mehrere LoRAs überlasten VRAM"
+    mitigation: "Max 3 LoRAs empfehlen, Warnung bei mehr"
+
+  - risk: "Backwards Compatibility"
+    mitigation: "v2.0 Storyboards funktionieren weiterhin (characters=[])"
+
+# =============================================================================
+# TIMELINE
+# =============================================================================
+
+timeline:
+  target_version: "v0.7.0"
+  phases:
+    - phase: 1
+      name: "CharacterLoraService"
+      effort: "klein"
+    - phase: 2
+      name: "Storyboard Format"
+      effort: "klein"
+    - phase: 3
+      name: "Storyboard Editor"
+      effort: "mittel"
+    - phase: 4
+      name: "Keyframe Generator"
+      effort: "mittel"

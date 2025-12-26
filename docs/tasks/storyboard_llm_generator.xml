@@ -1,0 +1,456 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<implementation_plan>
+  <metadata>
+    <title>Storyboard LLM Generator Addon</title>
+    <version>1.0</version>
+    <created>2025-12-24</created>
+    <status>planned</status>
+    <description>
+      Neues Addon zur automatischen Storyboard-Generierung via OpenRouter API.
+      User gibt eine Idee/Beschreibung ein, LLM generiert Draft-Storyboard,
+      lokale Validierung, dann Import in den Workflow.
+    </description>
+  </metadata>
+
+  <requirements>
+    <requirement id="R1">API-Key für OpenRouter verschlüsselt in DB speichern (wie HuggingFace/CivitAI)</requirement>
+    <requirement id="R2">User kann 3 Modelle zur Auswahl hinterlegen (z.B. Claude, GPT-4, Llama)</requirement>
+    <requirement id="R3">Prompt-Template mit Beispiel-Storyboard für konsistente Ausgabe</requirement>
+    <requirement id="R4">Draft-Bearbeitung im UI vor Import</requirement>
+    <requirement id="R5">Shared Component für Draft-Editor (wiederverwendbar in Storyboard Editor)</requirement>
+    <requirement id="R6">Lokale Validierung des generierten JSON</requirement>
+  </requirements>
+
+  <architecture>
+    <layer name="infrastructure">
+      <component id="C1" file="infrastructure/settings_store.py">
+        <change type="modify">
+          SENSITIVE_KEYS um "openrouter_api_key" erweitern
+        </change>
+      </component>
+      <component id="C2" file="infrastructure/config_manager.py">
+        <change type="modify">
+          Neue Methoden:
+          - get_openrouter_api_key() / set_openrouter_api_key()
+          - get_openrouter_models() / set_openrouter_models() (Liste von 3 Modellen)
+        </change>
+      </component>
+      <component id="C3" file="infrastructure/openrouter_client.py">
+        <change type="create">
+          OpenRouter API Client:
+          - generate_storyboard(idea: str, model: str) -> Dict
+          - list_available_models() -> List[str] (optional, für UI)
+          - Error Handling mit Custom Exceptions
+        </change>
+      </component>
+    </layer>
+
+    <layer name="domain">
+      <component id="C4" file="domain/validators.py">
+        <change type="modify">
+          Neuer Validator: StoryboardDraftValidator
+          - Validiert generiertes JSON gegen Storyboard-Schema
+          - Gibt detaillierte Fehlermeldungen zurück
+        </change>
+      </component>
+      <component id="C5" file="domain/exceptions.py">
+        <change type="modify">
+          Neue Exceptions:
+          - OpenRouterAPIError
+          - StoryboardValidationError
+        </change>
+      </component>
+    </layer>
+
+    <layer name="services">
+      <component id="C6" file="services/storyboard_llm_service.py">
+        <change type="create">
+          StoryboardLLMService:
+          - generate_draft(idea: str, model: str) -> Tuple[Storyboard, List[str]]
+          - validate_draft(json_str: str) -> Tuple[bool, List[str]]
+          - get_prompt_template() -> str
+          - Orchestriert OpenRouterClient + Validierung
+        </change>
+      </component>
+    </layer>
+
+    <layer name="addons/components">
+      <component id="C7" file="addons/components/storyboard_draft_editor.py">
+        <change type="create">
+          Shared Component für Draft-Bearbeitung:
+          - JSON Code Editor (interaktiv)
+          - Live-Validierung mit Fehleranzeige
+          - Shot-Vorschau als Tabelle
+          - Import-Button
+          Verwendbar in: Storyboard Editor + LLM Generator
+        </change>
+      </component>
+    </layer>
+
+    <layer name="addons">
+      <component id="C8" file="addons/storyboard_llm_generator.py">
+        <change type="create">
+          Neues Addon Tab:
+          - Input: Idee/Beschreibung (TextArea)
+          - Model-Auswahl (Dropdown aus 3 konfigurierten)
+          - Generate Button
+          - Draft Editor (shared component)
+          - Import to Project Button
+        </change>
+      </component>
+      <component id="C9" file="addons/storyboard_editor.py">
+        <change type="modify">
+          Integration des shared Draft-Editor Components
+          für Import-Funktion (optional, Phase 2)
+        </change>
+      </component>
+      <component id="C10" file="addons/settings_panel.py">
+        <change type="modify">
+          Neue Sektion "OpenRouter":
+          - API Key Input (Password-Feld)
+          - 3x Model-Name Inputs
+          - Test Connection Button
+        </change>
+      </component>
+    </layer>
+
+    <layer name="config">
+      <component id="C11" file="data/templates/storyboard_prompt_template.txt">
+        <change type="create">
+          Prompt-Template für LLM mit:
+          - Systemrolle (Storyboard-Experte)
+          - JSON-Schema Beschreibung
+          - Beispiel-Storyboard
+          - Output-Format Anweisungen
+        </change>
+      </component>
+    </layer>
+
+    <layer name="main">
+      <component id="C12" file="main.py">
+        <change type="modify">
+          Neues Addon registrieren: StoryboardLLMGeneratorAddon
+        </change>
+      </component>
+    </layer>
+  </architecture>
+
+  <implementation_phases>
+    <phase id="P1" name="Infrastructure" status="pending">
+      <description>API-Key Storage und OpenRouter Client</description>
+      <tasks>
+        <task id="T1.1" component="C1">SENSITIVE_KEYS erweitern</task>
+        <task id="T1.2" component="C2">ConfigManager Methoden hinzufügen</task>
+        <task id="T1.3" component="C3">OpenRouter Client erstellen</task>
+        <task id="T1.4" component="C5">Neue Exceptions definieren</task>
+      </tasks>
+      <dependencies>keine</dependencies>
+    </phase>
+
+    <phase id="P2" name="Domain + Service" status="pending">
+      <description>Validierung und Service-Layer</description>
+      <tasks>
+        <task id="T2.1" component="C4">StoryboardDraftValidator erstellen</task>
+        <task id="T2.2" component="C6">StoryboardLLMService erstellen</task>
+        <task id="T2.3" component="C11">Prompt-Template erstellen</task>
+      </tasks>
+      <dependencies>P1</dependencies>
+    </phase>
+
+    <phase id="P3" name="Shared Component" status="pending">
+      <description>Wiederverwendbarer Draft-Editor</description>
+      <tasks>
+        <task id="T3.1" component="C7">storyboard_draft_editor.py erstellen</task>
+        <task id="T3.2">Unit Tests für Component</task>
+      </tasks>
+      <dependencies>P2</dependencies>
+    </phase>
+
+    <phase id="P4" name="Addon + Settings" status="pending">
+      <description>UI Integration</description>
+      <tasks>
+        <task id="T4.1" component="C10">Settings Panel erweitern</task>
+        <task id="T4.2" component="C8">LLM Generator Addon erstellen</task>
+        <task id="T4.3" component="C12">main.py aktualisieren</task>
+      </tasks>
+      <dependencies>P3</dependencies>
+    </phase>
+
+    <phase id="P5" name="Testing + Polish" status="pending">
+      <description>Tests und Feinschliff</description>
+      <tasks>
+        <task id="T5.1">Integration Tests</task>
+        <task id="T5.2">Error Handling verbessern</task>
+        <task id="T5.3">Dokumentation (STORYBOARD_LLM_GENERATOR.md)</task>
+      </tasks>
+      <dependencies>P4</dependencies>
+    </phase>
+  </implementation_phases>
+
+  <ui_design>
+    <addon name="Storyboard LLM Generator">
+      <layout>
+        <section name="header">
+          <element type="HTML">Projekt-Status (wie andere Addons)</element>
+        </section>
+
+        <section name="input" layout="column">
+          <element type="Markdown">### Idee eingeben</element>
+          <element type="TextArea" id="idea_input">
+            <label>Beschreibe deine Video-Idee</label>
+            <placeholder>z.B. "Ein kurzer Werbespot für ein Café.
+Szene 1: Außenansicht bei Sonnenaufgang
+Szene 2: Barista bereitet Kaffee zu
+Szene 3: Zufriedener Kunde genießt Kaffee"</placeholder>
+            <lines>8</lines>
+          </element>
+
+          <element type="Row">
+            <element type="Dropdown" id="model_select">
+              <label>LLM Modell</label>
+              <choices>aus Settings (3 konfigurierte)</choices>
+            </element>
+            <element type="Button" id="generate_btn" variant="primary">
+              Storyboard generieren
+            </element>
+          </element>
+        </section>
+
+        <section name="output" layout="column">
+          <element type="Markdown">### Draft-Vorschau</element>
+
+          <element type="Tabs">
+            <tab name="Shots">
+              <element type="Dataframe" id="shot_preview">
+                <headers>#, ID, Filename, Description, Duration</headers>
+              </element>
+            </tab>
+            <tab name="JSON Editor">
+              <element type="Code" id="json_editor" language="json" interactive="true">
+                <lines>20</lines>
+              </element>
+            </tab>
+          </element>
+
+          <element type="Markdown" id="validation_status">
+            Validierungsstatus (Fehler/Warnungen)
+          </element>
+
+          <element type="Row">
+            <element type="Button" id="validate_btn" variant="secondary">
+              Validieren
+            </element>
+            <element type="Button" id="import_btn" variant="primary">
+              In Projekt importieren
+            </element>
+          </element>
+        </section>
+      </layout>
+    </addon>
+
+    <addon name="Settings Panel (Erweiterung)">
+      <section name="OpenRouter API">
+        <element type="Accordion" label="OpenRouter (LLM)">
+          <element type="Textbox" id="openrouter_api_key" type="password">
+            <label>API Key</label>
+          </element>
+          <element type="Markdown">Modelle zur Auswahl (max. 3)</element>
+          <element type="Textbox" id="model_1">
+            <label>Modell 1</label>
+            <value>anthropic/claude-3.5-sonnet</value>
+          </element>
+          <element type="Textbox" id="model_2">
+            <label>Modell 2</label>
+            <value>openai/gpt-4o</value>
+          </element>
+          <element type="Textbox" id="model_3">
+            <label>Modell 3</label>
+            <value>meta-llama/llama-3.1-70b-instruct</value>
+          </element>
+          <element type="Button" id="test_openrouter">
+            Verbindung testen
+          </element>
+        </element>
+      </section>
+    </addon>
+  </ui_design>
+
+  <prompt_template>
+    <system_prompt><![CDATA[
+Du bist ein erfahrener Storyboard-Designer für KI-generierte Videos.
+Deine Aufgabe ist es, aus einer Idee ein strukturiertes Storyboard im JSON-Format zu erstellen.
+
+Das JSON muss exakt diesem Schema folgen:
+{
+  "project": "Projektname",
+  "description": "Kurze Projektbeschreibung",
+  "version": "2.2",
+  "shots": [
+    {
+      "shot_id": "001",           // Fortlaufende Nummer
+      "filename_base": "name",    // Keine Leerzeichen, lowercase mit Bindestrichen
+      "description": "Kurze Beschreibung der Szene",
+      "prompt": "Detaillierter Prompt für Bildgenerierung...",
+      "negative_prompt": "blurry, low quality, distorted",
+      "width": 1024,              // Standard: 1024
+      "height": 576,              // Standard: 576 (16:9)
+      "duration": 3.0,            // Sekunden (3.0 = Standard)
+      "presets": {
+        "style": "cinematic|photorealistic|anime|artistic",
+        "lighting": "natural|studio|dramatic|soft|golden_hour",
+        "mood": "peaceful|dramatic|mysterious|joyful|melancholic",
+        "camera": "static|pan_left|pan_right|zoom_in|zoom_out|tracking"
+      }
+    }
+  ],
+  "video_settings": {
+    "default_fps": 24,
+    "max_duration": 3.0
+  }
+}
+
+Wichtige Regeln:
+1. Jeder Shot sollte 3-5 Sekunden dauern (Standard: 3.0)
+2. filename_base: lowercase, keine Leerzeichen, Bindestriche erlaubt
+3. Prompts sollten detailliert und visuell beschreibend sein
+4. shot_id: Fortlaufend "001", "002", "003", etc.
+5. Gib NUR valides JSON zurück, keine Erklärungen
+
+BEISPIEL:
+]]></system_prompt>
+    <example_storyboard><![CDATA[
+{
+  "project": "Morgenkaffee Werbespot",
+  "description": "Kurzer Werbespot für ein gemütliches Café",
+  "version": "2.2",
+  "shots": [
+    {
+      "shot_id": "001",
+      "filename_base": "cafe-exterior-sunrise",
+      "description": "Außenansicht des Cafés bei Sonnenaufgang",
+      "prompt": "cozy corner cafe exterior at sunrise, warm golden light, steam rising from chimney, cobblestone street, European style architecture, morning mist, cinematic lighting, 4k",
+      "negative_prompt": "blurry, low quality, distorted, people",
+      "width": 1024,
+      "height": 576,
+      "duration": 3.0,
+      "presets": {
+        "style": "cinematic",
+        "lighting": "golden_hour",
+        "mood": "peaceful",
+        "camera": "slow_zoom_in"
+      }
+    },
+    {
+      "shot_id": "002",
+      "filename_base": "barista-pouring",
+      "description": "Nahaufnahme: Barista gießt Milch in Espresso",
+      "prompt": "close-up of barista hands pouring steamed milk into espresso, latte art forming, professional coffee machine in background, warm interior lighting, shallow depth of field, steam rising, 4k cinematic",
+      "negative_prompt": "blurry, low quality, distorted face",
+      "width": 1024,
+      "height": 576,
+      "duration": 4.0,
+      "presets": {
+        "style": "photorealistic",
+        "lighting": "soft",
+        "mood": "craftsmanship",
+        "camera": "static"
+      }
+    },
+    {
+      "shot_id": "003",
+      "filename_base": "customer-enjoying",
+      "description": "Kunde genießt Kaffee am Fenster",
+      "prompt": "satisfied customer sitting by window, holding warm coffee cup, gentle smile, morning sunlight streaming through glass, cozy cafe interior, bokeh background, peaceful atmosphere, 4k",
+      "negative_prompt": "blurry, low quality, distorted, ugly",
+      "width": 1024,
+      "height": 576,
+      "duration": 3.0,
+      "presets": {
+        "style": "cinematic",
+        "lighting": "natural",
+        "mood": "joyful",
+        "camera": "slow_pan_right"
+      }
+    }
+  ],
+  "video_settings": {
+    "default_fps": 24,
+    "max_duration": 3.0
+  }
+}
+]]></example_storyboard>
+  </prompt_template>
+
+  <file_structure>
+    <tree><![CDATA[
+cindergrace_gui/
+├── infrastructure/
+│   ├── settings_store.py        [MODIFY] SENSITIVE_KEYS + openrouter_api_key
+│   ├── config_manager.py        [MODIFY] get/set openrouter methods
+│   └── openrouter_client.py     [CREATE] API Client
+├── domain/
+│   ├── validators.py            [MODIFY] StoryboardDraftValidator
+│   └── exceptions.py            [MODIFY] OpenRouterAPIError
+├── services/
+│   └── storyboard_llm_service.py [CREATE] Orchestration Service
+├── addons/
+│   ├── components/
+│   │   └── storyboard_draft_editor.py [CREATE] Shared Component
+│   ├── storyboard_llm_generator.py    [CREATE] New Addon
+│   └── settings_panel.py              [MODIFY] OpenRouter Section
+├── data/
+│   └── templates/
+│       └── storyboard_prompt_template.txt [CREATE] LLM Prompt
+├── docs/
+│   └── addons/
+│       └── STORYBOARD_LLM_GENERATOR.md    [CREATE] Documentation
+└── main.py                      [MODIFY] Register Addon
+    ]]></tree>
+  </file_structure>
+
+  <openrouter_api>
+    <endpoint>https://openrouter.ai/api/v1/chat/completions</endpoint>
+    <headers>
+      <header name="Authorization">Bearer {API_KEY}</header>
+      <header name="HTTP-Referer">https://cindergrace.local</header>
+      <header name="X-Title">Cindergrace Pipeline</header>
+    </headers>
+    <request_format><![CDATA[
+{
+  "model": "anthropic/claude-3.5-sonnet",
+  "messages": [
+    {"role": "system", "content": "...prompt template..."},
+    {"role": "user", "content": "...user idea..."}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 4000
+}
+    ]]></request_format>
+    <popular_models>
+      <model id="anthropic/claude-3.5-sonnet">Beste Qualität für strukturiertes JSON</model>
+      <model id="openai/gpt-4o">Schnell und zuverlässig</model>
+      <model id="openai/gpt-4o-mini">Günstig für Tests</model>
+      <model id="meta-llama/llama-3.1-70b-instruct">Open Source Alternative</model>
+      <model id="google/gemini-pro-1.5">Google Alternative</model>
+    </popular_models>
+  </openrouter_api>
+
+  <notes>
+    <note type="security">
+      API-Key wird wie HuggingFace/CivitAI mit Fernet verschlüsselt.
+      Machine-spezifisch, nicht portabel.
+    </note>
+    <note type="ux">
+      Draft-Editor zeigt Live-Validierung. Fehler werden rot markiert,
+      erfolgreiche Validierung grün. Import nur bei valider JSON möglich.
+    </note>
+    <note type="extensibility">
+      Shared Component ermöglicht spätere Integration in Storyboard Editor
+      für manuelle JSON-Imports oder Template-basierte Erstellung.
+    </note>
+    <note type="cost">
+      OpenRouter bietet Pay-per-Token. Claude 3.5 Sonnet: ~$3/1M tokens.
+      Ein Storyboard: ~500-1000 tokens = ~$0.003 pro Generation.
+    </note>
+  </notes>
+</implementation_plan>

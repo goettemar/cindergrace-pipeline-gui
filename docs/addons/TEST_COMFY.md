@@ -1,6 +1,6 @@
-# 🧪 Test ComfyUI
+# 🧪 Test (ComfyUI Connection Test)
 
-**Tab Name:** 🧪 Test ComfyUI (under 🔧 Tools)
+**Tab Name:** 🧪 Test
 **File:** `addons/test_comfy_flux.py`
 **Lines:** ~110
 **Category:** `tools` (grouped under Tools tab)

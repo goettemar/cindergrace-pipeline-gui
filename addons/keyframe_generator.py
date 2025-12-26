@@ -24,7 +24,8 @@ class KeyframeGeneratorAddon(BaseAddon):
     def __init__(self):
         super().__init__(
             name="Keyframe Generator",
-            description="Generate multiple keyframe variants for each storyboard shot"
+            description="Generate multiple keyframe variants for each storyboard shot",
+            category="production"
         )
         self.config = ConfigManager()
         self.current_storyboard: Optional[domain_models.Storyboard] = None
@@ -42,16 +43,16 @@ class KeyframeGeneratorAddon(BaseAddon):
         self.character_lora_service = CharacterLoraService(self.config)
 
     def get_tab_name(self) -> str:
-        return "🎬 Keyframe Generator"
+        return "🎬 Keyframes"
 
     def _project_status_md(self) -> str:
         project = self.project_manager.get_active_project(refresh=True)
         if not project:
-            return "Kein aktives Projekt"
-        name = project.get("name", "Unbekannt")
-        slug = project.get("slug", "unbekannt")
+            return "No active project"
+        name = project.get("name", "Unknown")
+        slug = project.get("slug", "unknown")
         path = project.get("path", "")
-        return f"Projekt: {name} ({slug}) – {path}"
+        return f"Project: {name} ({slug}) – {path}"
 
     def render(self) -> gr.Blocks:
         # Auto-load storyboard on tab open
@@ -92,7 +93,7 @@ class KeyframeGeneratorAddon(BaseAddon):
                             choices=self._get_available_models(self._get_default_workflow()),
                             value=self._get_default_model(self._get_default_workflow()),
                             label="Diffusion Model",
-                            info="Getestete Modelle für diesen Workflow",
+                            info="Tested models for this workflow",
                             visible=self._has_model_selection(self._get_default_workflow())
                         )
 
@@ -206,6 +207,9 @@ class KeyframeGeneratorAddon(BaseAddon):
         # Refresh config to pick up changes from other tabs (Storyboard Editor, Project tab)
         self.config.refresh()
 
+        # NOTE: Removed auto-rescan to avoid performance issues with Gradio timers
+        # Workflows are now cached - use Settings > Rescan Workflows if new files are added
+
         # Project status
         project_status = project_status_md(self.project_manager, "🎬 Keyframe Generator")
 
@@ -219,9 +223,10 @@ class KeyframeGeneratorAddon(BaseAddon):
         else:
             status = "**Status:** Ready"
 
-        # Get current default workflow to preserve it on tab refresh
+        # Get updated workflow list after rescan
+        workflows = self._get_available_workflows()
         default_workflow = self._get_default_workflow()
-        workflow_update = gr.update(value=default_workflow)
+        workflow_update = gr.update(choices=workflows, value=default_workflow)
 
         # Check character-model compatibility with default model
         default_model = self._get_default_model(default_workflow)
@@ -236,7 +241,7 @@ class KeyframeGeneratorAddon(BaseAddon):
         storyboard.raw["storyboard_file"] = storyboard_file
         return storyboard
 
-    @handle_errors("Ungültige Eingabeparameter", return_tuple=True)
+    @handle_errors("Invalid input parameters", return_tuple=True)
     def _validate_generation_inputs(self, variants_per_shot: int, base_seed: int, workflow_file: str) -> KeyframeGeneratorInput:
         validated_inputs = KeyframeGeneratorInput(
             variants_per_shot=int(variants_per_shot),
@@ -263,7 +268,7 @@ class KeyframeGeneratorAddon(BaseAddon):
     def load_storyboard_from_config(self) -> Tuple[str, str]:
         storyboard_file = self.config.get_current_storyboard()
         if not storyboard_file:
-            return "{}", "**❌ Error:** Kein Storyboard gesetzt. Bitte im Tab '📁 Projekt' auswählen."
+            return "{}", "**❌ Error:** No storyboard set. Please select one in the '📁 Project' tab."
 
         storyboard, error = self._load_storyboard_model(storyboard_file)
         if error:
@@ -304,14 +309,14 @@ class KeyframeGeneratorAddon(BaseAddon):
         lora_variant = self.workflow_registry.get_lora_variant(workflow_file)
 
         if lora_variant:
-            logger.info(f"LoRA erkannt im Storyboard - verwende {lora_variant} statt {workflow_file}")
+            logger.info(f"LoRA detected in storyboard - using {lora_variant} instead of {workflow_file}")
             return lora_variant, None
         else:
             # LoRA in storyboard but no LoRA workflow available
             warning = (
-                f"⚠️ **Warnung:** Storyboard enthält Character LoRA, aber kein passender "
-                f"`gcpl_*` Workflow gefunden für `{workflow_file}`. "
-                f"LoRA wird ignoriert."
+                f"⚠️ **Warning:** Storyboard contains Character LoRA, but no matching "
+                f"`gcpl_*` workflow found for `{workflow_file}`. "
+                f"LoRA will be ignored."
             )
             logger.warning(warning)
             return workflow_file, warning
@@ -327,17 +332,17 @@ class KeyframeGeneratorAddon(BaseAddon):
         self.config.refresh()
         storyboard_file = self.config.get_current_storyboard()
         if not storyboard_file:
-            yield [], "**❌ Error:** Kein Storyboard gesetzt. Bitte im Tab '📁 Projekt' auswählen.", "No storyboard", {}, "No shot"
+            yield [], "**❌ Error:** No storyboard set. Please select one in the '📁 Project' tab.", "No storyboard", {}, "No shot"
             return
 
         project = self.project_manager.get_active_project(refresh=True)
         if not project:
-            yield [], "**❌ Error:** Kein aktives Projekt. Bitte zuerst im Tab '📁 Projekt' auswählen.", "No project", {}, "No shot"
+            yield [], "**❌ Error:** No active project. Please select one in the '📁 Project' tab first.", "No project", {}, "No shot"
             return
 
         validated_inputs, validation_error = self._validate_generation_inputs(variants_per_shot, base_seed, workflow_file)
         if validation_error:
-            yield [], validation_error, "Ungültige Eingabeparameter", {}, "Error"
+            yield [], validation_error, "Invalid input parameters", {}, "Error"
             return
 
         if self.current_storyboard is None:
@@ -349,7 +354,7 @@ class KeyframeGeneratorAddon(BaseAddon):
         # Resolve workflow (auto-switch to LoRA variant if needed)
         resolved_workflow, lora_warning = self._resolve_workflow_for_lora(workflow_file)
         if lora_warning:
-            yield [], lora_warning, "LoRA Warnung", {}, "Warning"
+            yield [], lora_warning, "LoRA Warning", {}, "Warning"
             # Continue with generation despite warning
 
         # Determine model override (None if "(Standard)" selected)
@@ -385,12 +390,12 @@ class KeyframeGeneratorAddon(BaseAddon):
         self.config.refresh()
         storyboard_file = self.config.get_current_storyboard()
         if not storyboard_file:
-            yield [], "**❌ Error:** Kein Storyboard gesetzt. Bitte im Tab '📁 Projekt' auswählen.", "No storyboard", {}, "No shot"
+            yield [], "**❌ Error:** No storyboard set. Please select one in the '📁 Project' tab.", "No storyboard", {}, "No shot"
             return
 
         project = self.project_manager.get_active_project(refresh=True)
         if not project:
-            yield [], "**❌ Error:** Kein aktives Projekt. Bitte im Tab '📁 Projekt' auswählen.", "No project", {}, "No shot"
+            yield [], "**❌ Error:** No active project. Please select one in the '📁 Project' tab.", "No project", {}, "No shot"
             return
 
         checkpoint = self._load_checkpoint(storyboard_file, project)
@@ -436,25 +441,25 @@ class KeyframeGeneratorAddon(BaseAddon):
         parts = []
         if project:
             badge = "✅" if os.path.isdir(project.get("path", "")) else "⚠️"
-            parts.append(f"Projekt: {badge} {project.get('name')} (`{project.get('slug')}`)")
+            parts.append(f"Project: {badge} {project.get('name')} (`{project.get('slug')}`)")
         else:
-            parts.append("Projekt: ⚠️ keines gewählt")
+            parts.append("Project: ⚠️ none selected")
 
         if storyboard:
             sb_badge = "✅" if os.path.exists(storyboard) else "⚠️"
             parts.append(f"Storyboard: {sb_badge} `{shorten_storyboard_path(storyboard)}`")
         else:
-            parts.append("Storyboard: ⚠️ keines gesetzt")
+            parts.append("Storyboard: ⚠️ none set")
 
-        parts.append(f"Auflösung: {width}x{height}")
+        parts.append(f"Resolution: {width}x{height}")
         parts.append(f"ComfyUI: {comfy_url}")
         return " | ".join(parts)
 
-    @handle_errors("Konnte Ausgabeordner nicht öffnen")
+    @handle_errors("Could not open output folder")
     def open_output_folder(self) -> str:
         project = self.project_manager.get_active_project(refresh=True)
         if not project:
-            return "**❌ Error:** Kein aktives Projekt. Bitte im Tab 'Projekt' auswählen."
+            return "**❌ Error:** No active project. Please select one in the 'Project' tab."
         output_dir = self.project_manager.ensure_dir(project, "keyframes")
         os.makedirs(output_dir, exist_ok=True)
         os.system(f'xdg-open "{output_dir}"')
@@ -465,7 +470,7 @@ class KeyframeGeneratorAddon(BaseAddon):
         self.config.refresh()
         storyboard_file = self.config.get_current_storyboard()
         if not storyboard_file or not os.path.exists(storyboard_file):
-            return "**Storyboard:** Nicht geladen"
+            return "**Storyboard:** Not loaded"
         filename = os.path.basename(storyboard_file)
         return f"**Storyboard:** `{filename}`"
 
@@ -481,15 +486,15 @@ class KeyframeGeneratorAddon(BaseAddon):
     def _set_default_workflow(self, workflow_file: str) -> str:
         """Set selected workflow as default for keyframe generation."""
         if not workflow_file or workflow_file.startswith("No "):
-            return "**⚠️ Kein Workflow ausgewählt**"
+            return "**⚠️ No workflow selected**"
 
         success = self.workflow_registry.set_default(PREFIX_KEYFRAME, workflow_file)
         if success:
             display_name = self.workflow_registry.get_display_name(workflow_file)
             logger.info(f"Set default keyframe workflow: {workflow_file}")
-            return f"**✅ Default gesetzt:** {display_name}"
+            return f"**✅ Default set:** {display_name}"
         else:
-            return "**❌ Fehler beim Setzen des Defaults**"
+            return "**❌ Error setting default**"
 
     def _rescan_workflows(self):
         """Rescan filesystem for workflows and update cache."""
@@ -500,7 +505,7 @@ class KeyframeGeneratorAddon(BaseAddon):
         workflows = self._get_available_workflows()
         default = self._get_default_workflow()
 
-        status = f"**✅ Scan abgeschlossen:** {count} Keyframe + {lora_count} LoRA Workflows"
+        status = f"**✅ Scan complete:** {count} Keyframe + {lora_count} LoRA Workflows"
         return gr.update(choices=workflows, value=default), status
 
     def _get_comfy_models_dir(self) -> str:
@@ -591,7 +596,7 @@ class KeyframeGeneratorAddon(BaseAddon):
 
         if warnings:
             full_warning = "\n\n".join(warnings)
-            full_warning += "\n\n**Trotzdem generieren?** Die Generation wird nicht blockiert."
+            full_warning += "\n\n**Generate anyway?** Generation will not be blocked."
             return gr.update(value=full_warning, visible=True)
 
         return gr.update(value="", visible=False)

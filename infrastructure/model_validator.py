@@ -80,5 +80,11 @@ class ModelValidator:
 
         return filename.lower() in self._index
 
+    def rebuild_index(self) -> int:
+        """Rebuild the model index from scratch. Returns number of models found."""
+        self._index = None
+        self._build_index()
+        return len(self._index) if self._index else 0
+
 
 __all__ = ["ModelValidator"]

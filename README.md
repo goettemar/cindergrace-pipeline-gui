@@ -469,6 +469,77 @@ Successfully Implemented:
 - ✅ **Workflow-Presets Editor** – Bearbeite `workflow_presets.json`, um Flux/Wan-Workflows zu kuratieren
 - ✅ **Live-Reload** – Änderungen können während einer Session neu geladen werden
 
+---
+
+### Tab 6: 📥 Image Importer (v0.6.0) - NEW!
+**Alternative zum Keyframe Generator: Vorhandene Bilder importieren**
+
+Successfully Implemented:
+- ✅ **Ordner-Scan** – Scanne beliebige Ordner nach Bildern (PNG, JPG, WEBP)
+- ✅ **File Upload** – Bilder direkt hochladen als Alternative
+- ✅ **Florence-2 AI-Analyse** – Automatische Prompt-Generierung via ComfyUI
+- ✅ **Storyboard-Erstellung** – Automatisch Storyboard aus importierten Bildern
+- ✅ **Workflow-Integration** – Direkt zum Video Generator, Keyframe Selector überspringen
+
+---
+
+### Tab 7: 🎞️ First/Last Frame Video (v0.6.0) - NEW!
+**Übergangsvideos zwischen Keyframes erstellen**
+
+Successfully Implemented:
+- ✅ **Multi-Bild Upload** – Mehrere Bilder hochladen und sortieren
+- ✅ **Clip-Gruppierung** – Bilder in separate Clips aufteilen
+- ✅ **Wan 2.2 Morphing** – Flüssige Übergänge zwischen Bildern generieren
+- ✅ **Flexible Einstellungen** – Auflösung, Frames, FPS, Steps konfigurierbar
+
+---
+
+### Tab 8: 🎭 Character Trainer (v0.6.0) - NEW!
+**LoRA Training Pipeline für Charaktere**
+
+Successfully Implemented:
+- ✅ **Phase 1+2: Dataset erstellen** – 15 verschiedene Ansichten aus einem Basis-Bild generieren
+- ✅ **Qwen Edit Integration** – Automatische Posen/Ansichten via ComfyUI
+- ✅ **Phase 3: LoRA Training** – Flux LoRA Training mit konfigurierbaren Presets
+- ✅ **VRAM-Presets** – Optimiert für 12GB, 16GB, 24GB+ Grafikkarten
+- ✅ **Training-Presets** – Schnell (500 Steps), Standard (3000), Qualität (6000)
+
+---
+
+### Tab 9: 🎤 Lipsync Studio (v0.6.0) - NEW!
+**Lippensynchrone Videos aus Audio und Charakter-Bildern**
+
+Successfully Implemented:
+- ✅ **Bild-Upload** – Charakter-Bild hochladen (Frontalansicht empfohlen)
+- ✅ **Audio-Verarbeitung** – MP3/WAV Upload mit Trimming-Funktion (ffmpeg)
+- ✅ **Wan 2.2 is2v** – Sound-to-Video für realistische Lippenbewegungen
+- ✅ **Flexible Auflösungen** – 480p, 720p, 1080p (Landscape & Portrait)
+- ✅ **Konfigurierbare Parameter** – Steps, CFG, FPS anpassbar
+- ✅ **Max. ~14 Sekunden** – Hardware-abhängig (evtl. nur ~10s auf Consumer-GPUs)
+
+Workflow:
+1. Charakter-Bild hochladen (Tab 1)
+2. Audio hochladen und auf ~10s trimmen (Tab 2)
+3. Prompt für Bewegung/Emotion eingeben (Tab 3)
+4. Generieren → Lippensynchrones Video
+
+Benötigte Modelle:
+- `wan2.2_s2v_14B_fp8_scaled.safetensors` (~15GB)
+- `wav2vec2_large_english_fp16.safetensors` (~1.2GB)
+
+---
+
+### Tab 10: Setup-Assistent (v0.6.0) - NEW!
+**Ersteinrichtung für neue Benutzer**
+
+Successfully Implemented:
+- ✅ **Systemprüfung** – Automatische Erkennung von Abhängigkeiten
+- ✅ **ComfyUI Installation** – Schritt-für-Schritt Anleitung (Windows/Linux)
+- ✅ **Konfiguration** – ComfyUI Pfad und URL einstellen
+- ✅ **Verbindungstest** – Prüfe ComfyUI-Erreichbarkeit
+
+---
+
 ### Verified Working With:
 - **Model:** flux1-krea-dev.safetensors (Flux variant)
 - **Workflow:** flux_test_simple.json (included example)
@@ -479,16 +550,17 @@ Successfully Implemented:
 
 ---
 
-## 🔮 Next Phase: Timeline Toolkit (v0.6.0)
+## 🔮 Next Phase: Timeline Toolkit & Long Lipsync (v0.7.0)
 
-**Status:** In Planung – Segmentierung & LastFrame-Chaining sind live, jetzt folgt Feinschliff
+**Status:** In Planung – Lipsync Studio ist live, jetzt folgt automatisierte Long-Form
 
 ### Roadmap-Ideen:
+- **Long Lipsync** – Automatische Segmentierung für Videos >14 Sekunden
+- **Deutsches wav2vec2** – Bessere Lipsync-Qualität für deutsche Sprache
 - Export eines `timeline.json`, das alle Segmente inkl. Dauer & Motion-Angaben für den Schnitt auflistet
 - Feinjustage der Wan-Motion (Strength/Easing) direkt aus dem Storyboard
 - Verbesserte Fortschrittsanzeige + Wiederaufnahme pro Segment
 - Fehlerbehandlung für fehlende Modelle/Nodes inkl. konkreter Hinweise
-- Vorbereitung auf spätere Add-ons (z.B. Lipsync-Modul nach v1.0)
 
 ---
 
@@ -518,6 +590,25 @@ Siehe `LOGGING_ERROR_HANDLING.md` für Migration Guide.
 
 ---
 
-**Status:** ✅ Phase 3 Beta – Keyframe Generator + Selector + Video Generator funktionsfähig (v0.5.1)
-**Last Updated:** December 10, 2025
-**Next:** Phase 4 – Timeline-/Motion-Tools & Qualitäts-Monitoring
+---
+
+## ☁️ Google Colab Integration (Beta)
+
+> ⚠️ **Experimentell / Nicht funktional** - Die Google Colab Integration befindet sich in der Beta-Phase und ist derzeit **nicht vollständig funktionsfähig**.
+
+Im Ordner `colab/` befinden sich Jupyter Notebooks für die Cloud-Nutzung von ComfyUI:
+- `Cindergrace_ComfyUI.ipynb` - ComfyUI Cloud Backend Setup
+- `Comfy2.ipynb` - Alternative Konfiguration
+
+**Bekannte Einschränkungen:**
+- Wan 2.2 Modell-URLs noch nicht hinterlegt
+- Cloudflare Tunnel kann instabil sein
+- Session-Timeout bei Google Colab Free Tier
+
+**Geplant für v0.8.0:** Vollständige Colab-Integration mit automatischem Modell-Download.
+
+---
+
+**Status:** ✅ Phase 3 Beta – Keyframe Generator + Selector + Video Generator + Lipsync Studio funktionsfähig (v0.6.0)
+**Last Updated:** December 16, 2025
+**Next:** Phase 4 – Long Lipsync, Timeline-Tools & Qualitäts-Monitoring

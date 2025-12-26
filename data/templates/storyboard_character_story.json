@@ -1,0 +1,173 @@
+{
+  "project": "Character Story",
+  "description": "A 6-shot character-focused storyboard for LoRA testing. Features consistent character across scenes with 5s and 8s shots.",
+  "version": "2.1",
+  "shots": [
+    {
+      "shot_id": "001",
+      "filename_base": "hero-portrait",
+      "description": "Opening: Character introduction portrait",
+      "prompt": "cinematic portrait of [character], soft studio lighting, neutral background, confident expression, professional photography, 8k quality",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark, multiple people",
+      "presets": {
+        "style": "photorealistic",
+        "lighting": "soft",
+        "mood": "confident",
+        "composition": "centered",
+        "camera": "static",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.2
+      },
+      "duration": 3.0
+    },
+    {
+      "shot_id": "002",
+      "filename_base": "hero-walking-city",
+      "description": "Character walking through city - LONG SHOT",
+      "prompt": "[character] walking confidently through modern city street, urban environment, golden hour lighting, cinematic tracking shot, shallow depth of field",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "golden_hour",
+        "mood": "dynamic",
+        "composition": "rule_of_thirds",
+        "camera": "tracking",
+        "motion": "walking"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.5
+      },
+      "duration": 5.0
+    },
+    {
+      "shot_id": "003",
+      "filename_base": "hero-closeup",
+      "description": "Emotional close-up of character",
+      "prompt": "extreme close-up of [character] face, thoughtful expression, dramatic lighting, cinematic film look, bokeh background, emotional moment",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "dramatic",
+        "mood": "emotional",
+        "composition": "extreme_closeup",
+        "camera": "static",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.3
+      },
+      "duration": 3.0
+    },
+    {
+      "shot_id": "004",
+      "filename_base": "hero-action-scene",
+      "description": "Character in action sequence - LONG SHOT",
+      "prompt": "[character] in dynamic action pose, dramatic movement, motion blur effect, epic cinematic lighting, intense atmosphere, professional film production",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark, static",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "dramatic",
+        "mood": "intense",
+        "composition": "dynamic",
+        "camera": "handheld",
+        "motion": "dynamic"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.7
+      },
+      "duration": 8.0
+    },
+    {
+      "shot_id": "005",
+      "filename_base": "hero-contemplation",
+      "description": "Character in reflective moment",
+      "prompt": "[character] sitting by window, contemplative mood, soft natural light, peaceful atmosphere, introspective scene, artistic composition",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "artistic",
+        "lighting": "natural",
+        "mood": "contemplative",
+        "composition": "rule_of_thirds",
+        "camera": "slow_push",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.3
+      },
+      "duration": 3.0
+    },
+    {
+      "shot_id": "006",
+      "filename_base": "hero-finale",
+      "description": "Closing: Character triumphant finale",
+      "prompt": "[character] standing triumphantly on rooftop at sunset, epic wide shot, city skyline background, golden hour, heroic pose, cinematic masterpiece",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "golden_hour",
+        "mood": "triumphant",
+        "composition": "wide_shot",
+        "camera": "slow_zoom_out",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.4
+      },
+      "duration": 3.0
+    }
+  ],
+  "video_settings": {
+    "default_fps": 16,
+    "max_segment_duration": 3.0
+  }
+}

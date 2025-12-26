@@ -1,0 +1,173 @@
+{
+  "project": "Nature Journey",
+  "description": "A 6-shot nature documentary style storyboard. Includes longer shots (5s, 8s) to demonstrate video chaining.",
+  "version": "2.1",
+  "shots": [
+    {
+      "shot_id": "001",
+      "filename_base": "mountain-dawn",
+      "description": "Opening: First light hitting mountain peaks",
+      "prompt": "majestic snow-capped mountain peaks at dawn, first rays of sunlight, alpenglow effect, dramatic clouds below summit, aerial perspective, national geographic style",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "golden_hour",
+        "mood": "epic",
+        "composition": "wide_shot",
+        "camera": "slow_push",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.4
+      },
+      "duration": 3.0
+    },
+    {
+      "shot_id": "002",
+      "filename_base": "forest-stream",
+      "description": "Forest stream with morning mist - LONG SHOT",
+      "prompt": "crystal clear mountain stream flowing through ancient forest, morning mist rising, moss-covered rocks, sunbeams filtering through canopy, peaceful nature scene",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "volumetric",
+        "mood": "serene",
+        "composition": "leading_lines",
+        "camera": "tracking",
+        "motion": "flowing"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.5
+      },
+      "duration": 5.0
+    },
+    {
+      "shot_id": "003",
+      "filename_base": "deer-meadow",
+      "description": "Wildlife: Deer grazing in meadow",
+      "prompt": "elegant deer grazing in wildflower meadow, soft morning light, mountains in background, wildlife photography style, shallow depth of field",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark, humans",
+      "presets": {
+        "style": "photorealistic",
+        "lighting": "soft",
+        "mood": "peaceful",
+        "composition": "rule_of_thirds",
+        "camera": "static",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.3
+      },
+      "duration": 3.0
+    },
+    {
+      "shot_id": "004",
+      "filename_base": "waterfall-rainbow",
+      "description": "Waterfall with rainbow in spray - LONG SHOT",
+      "prompt": "magnificent waterfall cascading into emerald pool, rainbow forming in mist spray, lush tropical vegetation, dramatic perspective from below, adventure documentary style",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "bright",
+        "mood": "majestic",
+        "composition": "vertical",
+        "camera": "tilt_up",
+        "motion": "dynamic"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.6
+      },
+      "duration": 8.0
+    },
+    {
+      "shot_id": "005",
+      "filename_base": "eagle-soaring",
+      "description": "Eagle soaring over valley",
+      "prompt": "majestic bald eagle soaring high above mountain valley, wings spread wide, dramatic clouds, aerial perspective, wildlife documentary, sharp detail",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "dramatic",
+        "mood": "powerful",
+        "composition": "centered",
+        "camera": "tracking",
+        "motion": "smooth"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.5
+      },
+      "duration": 3.0
+    },
+    {
+      "shot_id": "006",
+      "filename_base": "sunset-valley",
+      "description": "Closing: Sunset over the valley",
+      "prompt": "breathtaking sunset over vast mountain valley, golden and orange sky, silhouetted pine trees, peaceful ending scene, cinematic wide establishing shot",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "golden_hour",
+        "mood": "peaceful",
+        "composition": "panoramic",
+        "camera": "slow_zoom_out",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.3
+      },
+      "duration": 3.0
+    }
+  ],
+  "video_settings": {
+    "default_fps": 16,
+    "max_segment_duration": 3.0
+  }
+}

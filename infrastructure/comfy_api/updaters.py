@@ -90,7 +90,7 @@ class BasicSchedulerUpdater(NodeUpdater):
 
 
 class EmptyLatentImageUpdater(NodeUpdater):
-    target_types = ("EmptyLatentImage", "ImageResize", "ImageResizeAndScale")
+    target_types = ("EmptyLatentImage", "ImageResize", "ImageResizeAndScale", "ImageResizeKJv2")
 
     def update(self, node_data: Dict[str, Any], params: Dict[str, Any]) -> None:
         width = params.get("width")
@@ -131,6 +131,75 @@ class WanImageToVideoUpdater(NodeUpdater):
             inputs["length"] = frames
 
 
+class LTXVLatentUpdater(NodeUpdater):
+    """Update LTX-Video latent nodes for resolution and frame count."""
+    target_types = (
+        "EmptyLTXVLatentVideo",
+        "LTXVStartEndFrameMask",
+        "LTXVImageToVideoLatent",
+        "LTXVImgToVideo",
+    )
+
+    def update(self, node_data: Dict[str, Any], params: Dict[str, Any]) -> None:
+        width = params.get("width")
+        height = params.get("height")
+        frames = _merge_params(
+            params.get("frames"),
+            params.get("num_frames"),
+            params.get("frame_count"),
+            params.get("length"),
+        )
+        inputs = node_data.setdefault("inputs", {})
+        if width is not None and "width" in inputs:
+            inputs["width"] = width
+        if height is not None and "height" in inputs:
+            inputs["height"] = height
+        if frames is not None and "length" in inputs:
+            inputs["length"] = frames
+
+
+class VHSVideoCombineUpdater(NodeUpdater):
+    """Update VHS_VideoCombine node for saving videos."""
+    target_types = ("VHS_VideoCombine",)
+
+    def update(self, node_data: Dict[str, Any], params: Dict[str, Any]) -> None:
+        filename_prefix = params.get("filename_prefix")
+        fps = _merge_params(params.get("fps"), params.get("frame_rate"))
+        inputs = node_data.setdefault("inputs", {})
+        if filename_prefix is not None and "filename_prefix" in inputs:
+            inputs["filename_prefix"] = filename_prefix
+        if fps is not None and "frame_rate" in inputs:
+            inputs["frame_rate"] = fps
+
+
+class SamplerCustomUpdater(NodeUpdater):
+    """Update SamplerCustom node for seed and cfg."""
+    target_types = ("SamplerCustom",)
+
+    def update(self, node_data: Dict[str, Any], params: Dict[str, Any]) -> None:
+        seed = params.get("seed")
+        cfg = params.get("cfg")
+        inputs = node_data.setdefault("inputs", {})
+        if seed is not None and "noise_seed" in inputs:
+            inputs["noise_seed"] = seed
+        if cfg is not None and "cfg" in inputs:
+            inputs["cfg"] = cfg
+
+
+class SaveAnimatedWEBPUpdater(NodeUpdater):
+    """Update SaveAnimatedWEBP node for filename prefix."""
+    target_types = ("SaveAnimatedWEBP",)
+
+    def update(self, node_data: Dict[str, Any], params: Dict[str, Any]) -> None:
+        filename_prefix = params.get("filename_prefix")
+        fps = _merge_params(params.get("fps"), params.get("frame_rate"))
+        inputs = node_data.setdefault("inputs", {})
+        if filename_prefix is not None and "filename_prefix" in inputs:
+            inputs["filename_prefix"] = filename_prefix
+        if fps is not None and "fps" in inputs:
+            inputs["fps"] = fps
+
+
 class LoadImageUpdater(NodeUpdater):
     target_types = ("LoadImage", "LoadImageForVideo", "ImageInput")
 
@@ -169,6 +238,59 @@ class HunyuanVideoSamplerUpdater(NodeUpdater):
             for key in ("num_frames", "frame_count", "frames"):
                 if key in inputs:
                     inputs[key] = frames
+
+
+class DiffusionModelUpdater(NodeUpdater):
+    """Update diffusion model loader nodes based on [MODEL] title convention.
+
+    Supports multiple model slots for workflows with High/Low Noise variants.
+    Node titles should follow the convention:
+        - "[MODEL] Load Diffusion Model" - main/default slot
+        - "[MODEL:high] Load Diffusion Model" - high noise slot
+        - "[MODEL:low] Load Diffusion Model" - low noise slot
+
+    Params:
+        model: Model path for main/default slot
+        model_high: Model path for high noise slot
+        model_low: Model path for low noise slot
+    """
+    target_types = ("UNETLoader", "UnetLoaderGGUF", "CheckpointLoaderSimple")
+
+    def _extract_slot(self, title: str) -> str:
+        """Extract slot name from title like '[MODEL:high] ...' -> 'high'."""
+        import re
+        match = re.match(r"\[MODEL(?::([a-z_]+))?\]", title)
+        if match:
+            return match.group(1) or ""  # "" for main slot
+        return ""
+
+    def _has_model_marker(self, title: str) -> bool:
+        """Check if title starts with [MODEL...]."""
+        return title.startswith("[MODEL")
+
+    def update(self, node_data: Dict[str, Any], params: Dict[str, Any]) -> None:
+        title = node_data.get("_meta", {}).get("title", "")
+        if not self._has_model_marker(title):
+            return
+
+        slot = self._extract_slot(title)
+
+        # Determine which param key to use
+        if slot:
+            model_path = params.get(f"model_{slot}")
+        else:
+            model_path = params.get("model") or params.get("model_main")
+
+        if not model_path:
+            return
+
+        inputs = node_data.setdefault("inputs", {})
+
+        # Handle different loader input keys
+        for key in ("unet_name", "ckpt_name", "model_name"):
+            if key in inputs:
+                inputs[key] = model_path
+                break
 
 
 class LoraLoaderUpdater(NodeUpdater):
@@ -228,12 +350,18 @@ def default_updaters() -> Iterable[NodeUpdater]:
         CLIPTextEncodeUpdater(),
         SaveImageUpdater(),
         SaveVideoUpdater(),
+        SaveAnimatedWEBPUpdater(),
         RandomNoiseUpdater(),
         KSamplerUpdater(),
         BasicSchedulerUpdater(),
+        SamplerCustomUpdater(),
         EmptyLatentImageUpdater(),
         WanImageToVideoUpdater(),
+        LTXVLatentUpdater(),
+        VHSVideoCombineUpdater(),
         LoadImageUpdater(),
         HunyuanVideoSamplerUpdater(),
+        DiffusionModelUpdater(),
+        LoraLoaderUpdater(),
         GenericSeedUpdater(),
     )

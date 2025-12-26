@@ -551,8 +551,10 @@ class ComfyUIAPI:
             "type": image_type
         }
         url = f"{self.server_url}/view?" + urllib.parse.urlencode(params)
+        headers = {'User-Agent': 'CINDERGRACE/1.0'}
+        request = urllib.request.Request(url, headers=headers)
 
-        with urllib.request.urlopen(url) as response:
+        with urllib.request.urlopen(request) as response:
             return response.read()
 
     def _get_request(self, endpoint: str) -> Dict[str, Any]:
@@ -569,9 +571,14 @@ class ComfyUIAPI:
             ComfyUIConnectionError: If request fails
         """
         url = f"{self.server_url}{endpoint}"
+        headers = {
+            'User-Agent': 'CINDERGRACE/1.0',
+            'Accept': 'application/json',
+        }
+        request = urllib.request.Request(url, headers=headers)
 
         try:
-            with urllib.request.urlopen(url, timeout=10) as response:
+            with urllib.request.urlopen(request, timeout=10) as response:
                 return json.loads(response.read())
         except urllib.error.URLError as e:
             raise ComfyUIConnectionError(f"Verbindung fehlgeschlagen: {e.reason}")

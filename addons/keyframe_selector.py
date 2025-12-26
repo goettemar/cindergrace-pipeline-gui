@@ -33,23 +33,24 @@ class KeyframeSelectorAddon(BaseAddon):
     def __init__(self):
         super().__init__(
             name="Keyframe Selector",
-            description="Review generated keyframes and pick the best variant per shot"
+            description="Review generated keyframes and pick the best variant per shot",
+            category="production"
         )
         self.config = ConfigManager()
         self.project_manager = ProjectStore(self.config)
         self.selection_service = SelectionService(self.project_manager)
 
     def get_tab_name(self) -> str:
-        return "✅ Keyframe Selector"
+        return "✅ Select"
 
     def _auto_load_storyboard(self) -> Dict[str, Any]:
         """Auto-load storyboard during render() - returns initial UI data."""
         defaults = {
             "storyboard_json": "{}",
-            "status": "**Status:** Storyboard noch nicht geladen",
+            "status": "**Status:** Storyboard noch nicht loaded",
             "shot_ids": [],
             "storyboard_state": {},
-            "summary": "Noch keine Keyframes ausgewählt.",
+            "summary": "No keyframes selected yet.",
             "preview": {},
             "selections_state": {},
             "variants_state": {},
@@ -64,10 +65,10 @@ class KeyframeSelectorAddon(BaseAddon):
 
             shots = storyboard.shots
             shot_ids = [shot.shot_id or f"{idx+1:03d}" for idx, shot in enumerate(shots)]
-            project_name = storyboard.project or "Unbekanntes Projekt"
+            project_name = storyboard.project or "Unknown Project"
 
             defaults["storyboard_json"] = json.dumps(storyboard_raw, indent=2)
-            defaults["status"] = status_md or f"**✅ Storyboard geladen:** {project_name} – {len(shots)} Shots"
+            defaults["status"] = status_md or f"**✅ Storyboard loaded:** {project_name} – {len(shots)} Shots"
             defaults["shot_ids"] = shot_ids
             defaults["storyboard_state"] = storyboard_raw
             defaults["summary"] = format_selection_summary({}, storyboard_raw)
@@ -93,8 +94,8 @@ class KeyframeSelectorAddon(BaseAddon):
             project_status = gr.HTML(project_status_md(self.project_manager, "✅ Keyframe Selector"))
 
             gr.Markdown(
-                "Lade ein Storyboard, überprüfe alle Varianten der generierten Keyframes "
-                "und speichere die beste Auswahl pro Shot."
+                "Load a storyboard, review all generated keyframe variants "
+                "and save the best selection per shot."
             )
 
             storyboard_section = create_storyboard_section(
@@ -111,49 +112,49 @@ class KeyframeSelectorAddon(BaseAddon):
             with gr.Row():
                 # Left sidebar - Shot selection and actions
                 with gr.Column(scale=1, min_width=220):
-                    gr.Markdown("### 🎬 Shot-Auswahl")
-                    refresh_shot_btn = gr.Button("🗂️ Keyframes aktualisieren", variant="secondary", size="sm")
+                    gr.Markdown("### 🎬 Shot Selection")
+                    refresh_shot_btn = gr.Button("🗂️ Refresh Keyframes", variant="secondary", size="sm")
                     shot_dropdown = gr.Dropdown(
                         choices=auto_loaded["shot_ids"],
                         value=auto_loaded["shot_ids"][0] if auto_loaded["shot_ids"] else None,
-                        label="Shot auswählen",
-                        info="Wähle einen Shot",
+                        label="Shot select",
+                        info="Select a shot",
                         interactive=True,
                     )
 
                     gr.Markdown("---")
-                    gr.Markdown("#### Variante verwalten")
+                    gr.Markdown("#### Manage Variant")
                     variant_radio = gr.Radio(
                         choices=[],
-                        label="Beste Variante auswählen",
-                        info="Wähle die beste Variante für diesen Shot",
+                        label="Select Best Variant",
+                        info="Choose the best variant for this shot",
                     )
-                    save_selection_btn = gr.Button("💾 Shot Variante speichern", variant="primary")
-                    clear_selection_btn = gr.Button("🗑️ Shot Variante entfernen", variant="stop")
+                    save_selection_btn = gr.Button("💾 Save Shot Variant", variant="primary")
+                    clear_selection_btn = gr.Button("🗑️ Remove Shot Variant", variant="stop")
 
                     # Delete confirmation dialog (hidden by default)
                     with gr.Group(visible=False) as clear_confirm_group:
                         clear_confirm_text = gr.Markdown(
-                            "### ⚠️ Variante entfernen?\n\n"
-                            "Die gespeicherte Auswahl für diesen Shot wird gelöscht."
+                            "### ⚠️ Remove variant?\n\n"
+                            "The saved selection for this shot will be deleted."
                         )
                         with gr.Row():
-                            clear_confirm_btn = gr.Button("✅ Ja, entfernen", variant="stop", size="sm")
-                            clear_cancel_btn = gr.Button("❌ Abbrechen", variant="secondary", size="sm")
+                            clear_confirm_btn = gr.Button("✅ Yes, remove", variant="stop", size="sm")
+                            clear_cancel_btn = gr.Button("❌ Cancel", variant="secondary", size="sm")
 
                     gr.Markdown("---")
-                    gr.Markdown("#### Export für Video Generator")
-                    export_btn = gr.Button("📤 Shot Auswahl speichern", variant="primary")
+                    gr.Markdown("#### Export for Video Generator")
+                    export_btn = gr.Button("📤 Save Shot Selection", variant="primary")
 
                     gr.Markdown("---")
-                    gr.Markdown("#### 📊 Auswahlübersicht")
+                    gr.Markdown("#### 📊 Selection Summary")
                     selection_summary = gr.Markdown(auto_loaded["summary"])
                     selection_warning = gr.Markdown("", visible=False)
 
                 # Right content - Shot overview and variants
                 with gr.Column(scale=4):
-                    gr.Markdown("### 🖼️ Shot-Überblick")
-                    shot_info = gr.Markdown("Kein Shot ausgewählt.")
+                    gr.Markdown("### 🖼️ Shot Overview")
+                    shot_info = gr.Markdown("No shot selected.")
 
                     keyframe_gallery = gr.Gallery(
                         label="Varianten",
@@ -279,7 +280,7 @@ class KeyframeSelectorAddon(BaseAddon):
             result[7],           # variants_state
         )
 
-    @handle_errors("Storyboard laden fehlgeschlagen", return_tuple=True)
+    @handle_errors("Failed to load storyboard", return_tuple=True)
     def _load_storyboard_model(self, storyboard_file: str):
         storyboard = StoryboardService.load_from_config(self.config, storyboard_file)
         StoryboardService.apply_resolution_from_config(storyboard, self.config)
@@ -295,7 +296,7 @@ class KeyframeSelectorAddon(BaseAddon):
             empty_preview = build_preview_payload({}, {})
             return (
                 "{}",
-                "**❌ Fehler:** Keine Storyboard-Datei ausgewählt",
+                "**❌ Error:** No storyboard file selected",
                 gr.update(choices=[]),
                 {},
                 empty_summary,
@@ -322,8 +323,8 @@ class KeyframeSelectorAddon(BaseAddon):
         shots = storyboard.shots
         shot_ids = [shot.shot_id or f"{idx+1:03d}" for idx, shot in enumerate(shots)]
         dropdown_update = gr.update(choices=shot_ids, value=shot_ids[0] if shot_ids else None)
-        project_name = storyboard.project or "Unbekanntes Projekt"
-        status = f"**✅ Storyboard geladen:** {project_name} – {len(shots)} Shots"
+        project_name = storyboard.project or "Unknown Project"
+        status = f"**✅ Storyboard loaded:** {project_name} – {len(shots)} Shots"
         storyboard_json = json.dumps(storyboard.raw, indent=2)
         summary = format_selection_summary({}, storyboard.raw)
         preview = build_preview_payload(storyboard.raw, {})
@@ -354,7 +355,7 @@ class KeyframeSelectorAddon(BaseAddon):
             empty_preview = build_preview_payload({}, {})
             return (
                 "{}",
-                "**❌ Fehler:** Kein Storyboard gesetzt. Bitte im Tab '📁 Projekt' auswählen.",
+                "**❌ Error:** No storyboard set. Please select in '📁 Project' tab.",
                 gr.update(choices=[]),
                 {},
                 empty_summary,
@@ -373,28 +374,28 @@ class KeyframeSelectorAddon(BaseAddon):
     ) -> Tuple[str, List[Tuple[str, str]], Any, str, Dict[str, Dict[str, Dict[str, Any]]]]:
         """Load gallery + variant list for selected shot"""
         if not storyboard_state:
-            return "Bitte zuerst ein Storyboard laden.", [], gr.update(choices=[]), "**❌ Fehler:** Kein Storyboard", variants_state
+            return "Please load a storyboard first.", [], gr.update(choices=[]), "**❌ Error:** No storyboard", variants_state
 
         project = self.project_manager.get_active_project(refresh=True)
         if not project:
             return (
-                "Kein aktives Projekt ausgewählt.",
+                "No active project selected.",
                 [],
                 gr.update(choices=[]),
-                "**❌ Fehler:** Bitte zuerst im Tab '📁 Projekt' ein Projekt wählen.",
+                "**❌ Error:** Please select a project in '📁 Project' tab first.",
                 variants_state,
             )
 
         shot = self._get_shot_by_id(storyboard_state, shot_id)
         if not shot:
-            return f"Shot `{shot_id}` nicht gefunden.", [], gr.update(choices=[]), "**❌ Fehler:** Ungültiger Shot", variants_state
+            return f"Shot `{shot_id}` not found.", [], gr.update(choices=[]), "**❌ Error:** Invalid shot", variants_state
 
         filename_base = shot.get("filename_base", shot_id)
         keyframes = self.selection_service.collect_keyframes(project, filename_base)
 
         if not keyframes:
             info = self._format_shot_markdown(shot, available=False)
-            status = f"**⚠️ Hinweis:** Keine Keyframes für `{filename_base}` gefunden."
+            status = f"**⚠️ Note:** No keyframes found for `{filename_base}`."
             variants_state = variants_state or {}
             variants_state[shot_id] = {}
             return info, [], gr.update(choices=[], value=None), status, variants_state
@@ -416,7 +417,7 @@ class KeyframeSelectorAddon(BaseAddon):
             default_value = label_match
 
         info = self._format_shot_markdown(shot, available=True, total=len(keyframes))
-        status = f"**ℹ️ {shot_id}:** {len(keyframes)} Varianten geladen."
+        status = f"**ℹ️ {shot_id}:** {len(keyframes)} Varianten loaded."
 
         return info, gallery_items, gr.update(choices=list(options_map.keys()), value=default_value), status, variants_state
 
@@ -427,18 +428,18 @@ class KeyframeSelectorAddon(BaseAddon):
     ) -> Tuple[str, Any]:
         """Show confirmation dialog for clearing selection."""
         if not shot_id:
-            return "### ⚠️ Kein Shot ausgewählt", gr.update(visible=False)
+            return "### ⚠️ No shot selected", gr.update(visible=False)
 
         if not selections_state or shot_id not in selections_state:
-            return f"### ℹ️ Keine Auswahl vorhanden\n\nFür Shot `{shot_id}` ist keine Variante gespeichert.", gr.update(visible=False)
+            return f"### ℹ️ No selection exists\n\nNo variant saved for shot `{shot_id}`.", gr.update(visible=False)
 
         entry = selections_state[shot_id]
-        confirm_text = f"""### ⚠️ Variante entfernen?
+        confirm_text = f"""### ⚠️ Remove variant?
 
 **Shot:** `{shot_id}`
-**Gespeicherte Variante:** `{entry.get('selected_file', 'Unbekannt')}`
+**Saved Variant:** `{entry.get('selected_file', 'Unknown')}`
 
-Die Auswahl für diesen Shot wird gelöscht."""
+The selection for this shot will be deleted."""
         return confirm_text, gr.update(visible=True)
 
     def save_selection(
@@ -455,17 +456,17 @@ Die Auswahl für diesen Shot wird gelöscht."""
         current_warning = self._get_selection_warning(selections_state, storyboard_state)
 
         if not shot_id:
-            return "**❌ Fehler:** Kein Shot ausgewählt.", current_summary, current_preview, selections_state, current_warning
+            return "**❌ Error:** No shot selected.", current_summary, current_preview, selections_state, current_warning
 
         options = (variants_state or {}).get(shot_id, {})
         if not options:
-            return f"**❌ Fehler:** Für `{shot_id}` sind keine Varianten geladen.", current_summary, current_preview, selections_state, current_warning
+            return f"**❌ Error:** No variants loaded for `{shot_id}`.", current_summary, current_preview, selections_state, current_warning
 
         # Check if user selected a variant
         if not selected_option:
             return (
-                "**⚠️ Hinweis:** Bitte zuerst eine Variante aus der Liste oben auswählen, "
-                "bevor du die Auswahl speicherst.",
+                "**⚠️ Note:** Please select a variant from the list above first, "
+                "before saving the selection.",
                 current_summary,
                 current_preview,
                 selections_state,
@@ -475,8 +476,8 @@ Die Auswahl für diesen Shot wird gelöscht."""
         choice = options.get(selected_option)
         if not choice:
             return (
-                "**⚠️ Hinweis:** Die gewählte Variante ist ungültig. "
-                "Bitte eine Variante aus der Liste 'Beste Variante auswählen' wählen.",
+                "**⚠️ Note:** The selected variant is invalid. "
+                "Please choose a variant from the 'Best Variant' list.",
                 current_summary,
                 current_preview,
                 selections_state,
@@ -500,7 +501,7 @@ Die Auswahl für diesen Shot wird gelöscht."""
         preview = build_preview_payload(storyboard_state, selections_state)
         warning = self._get_selection_warning(selections_state, storyboard_state)
 
-        status = f"**✅ Gespeichert:** Shot {shot_id} → {choice['filename']}"
+        status = f"**✅ Saved:** Shot {shot_id} → {choice['filename']}"
         return status, summary, preview, selections_state, warning
 
     def clear_selection(
@@ -512,7 +513,7 @@ Die Auswahl für diesen Shot wird gelöscht."""
         """Remove a saved selection for the active shot"""
         if not shot_id:
             return (
-                "**❌ Fehler:** Kein Shot ausgewählt.",
+                "**❌ Error:** No shot selected.",
                 format_selection_summary(selections_state, storyboard_state),
                 build_preview_payload(storyboard_state, selections_state),
                 selections_state,
@@ -522,9 +523,9 @@ Die Auswahl für diesen Shot wird gelöscht."""
 
         if selections_state and shot_id in selections_state:
             selections_state.pop(shot_id, None)
-            status = f"**🗑️ Entfernt:** Auswahl für Shot {shot_id} gelöscht."
+            status = f"**🗑️ Removed:** Selection for shot {shot_id} deleted."
         else:
-            status = f"**ℹ️ Hinweis:** Keine gespeicherte Auswahl für Shot {shot_id}."
+            status = f"**ℹ️ Note:** No saved selection for shot {shot_id}."
 
         summary = format_selection_summary(selections_state, storyboard_state)
         preview = build_preview_payload(storyboard_state, selections_state)
@@ -540,14 +541,14 @@ Die Auswahl für diesen Shot wird gelöscht."""
         no_warning = gr.update(visible=False)
 
         if not storyboard_state:
-            return "**❌ Fehler:** Bitte zuerst ein Storyboard laden.", {}, no_warning
+            return "**❌ Error:** Please load a storyboard first.", {}, no_warning
 
         if not selections_state:
-            return "**❌ Fehler:** Keine Auswahlen gespeichert.", {}, self._get_selection_warning(selections_state, storyboard_state)
+            return "**❌ Error:** No selections saved.", {}, self._get_selection_warning(selections_state, storyboard_state)
 
         project = self.project_manager.get_active_project(refresh=True)
         if not project:
-            return "**❌ Fehler:** Kein aktives Projekt. Bitte im Tab '📁 Projekt' auswählen.", {}, no_warning
+            return "**❌ Error:** No active project. Please select one in the '📁 Project' tab.", {}, no_warning
 
         # Check for incomplete selection before export
         total_shots = len(storyboard_state.get("shots", []))
@@ -555,8 +556,8 @@ Die Auswahl für diesen Shot wird gelöscht."""
         if selected_shots < total_shots:
             missing = total_shots - selected_shots
             return (
-                f"**⚠️ Warnung:** Nur {selected_shots} von {total_shots} Shots ausgewählt. "
-                f"Bitte alle Shots auswählen oder Export erzwingen.",
+                f"**⚠️ Warning:** Only {selected_shots} of {total_shots} shots selected. "
+                f"Please select all shots or force export.",
                 build_preview_payload(storyboard_state, selections_state),
                 self._get_selection_warning(selections_state, storyboard_state),
             )
@@ -565,24 +566,24 @@ Die Auswahl für diesen Shot wird gelöscht."""
         copied = export_payload.pop("_copied", 0)
         export_path = export_payload.pop("_path", "n/a")
         status = (
-            f"**✅ Export abgeschlossen:** {len(export_payload.get('selections', []))} Shots, "
-            f"{copied} Dateien kopiert → `{export_path}`"
+            f"**✅ Export complete:** {len(export_payload.get('selections', []))} shots, "
+            f"{copied} files copied → `{export_path}`"
         )
         return status, export_payload, gr.update(visible=False, value="")
 
     def _format_shot_markdown(self, shot: Dict[str, Any], available: bool, total: int = 0) -> str:
         """Readable shot metadata block"""
         lines = [
-            f"### Shot {shot.get('shot_id', 'N/A')} – {shot.get('filename_base', 'ohne Dateiname')}",
-            f"- **Beschreibung:** {shot.get('description', 'Keine Beschreibung')}",
-            f"- **Prompt:** {shot.get('prompt', 'Kein Prompt')[:160]}{'…' if len(shot.get('prompt', '')) > 160 else ''}",
-            f"- **Auflösung:** {shot.get('width', 1024)}×{shot.get('height', 576)}",
-            f"- **Kamera:** {shot.get('camera_movement', 'n/a')}",
+            f"### Shot {shot.get('shot_id', 'N/A')} – {shot.get('filename_base', 'no filename')}",
+            f"- **Description:** {shot.get('description', 'No description')}",
+            f"- **Prompt:** {shot.get('prompt', 'No prompt')[:160]}{'…' if len(shot.get('prompt', '')) > 160 else ''}",
+            f"- **Resolution:** {shot.get('width', 1024)}×{shot.get('height', 576)}",
+            f"- **Camera:** {shot.get('camera_movement', 'n/a')}",
         ]
         if available:
-            lines.append(f"- **Varianten gefunden:** {total}")
+            lines.append(f"- **Variants found:** {total}")
         else:
-            lines.append("- **Varianten gefunden:** 0")
+            lines.append("- **Variants found:** 0")
         return "\n".join(lines)
 
     def _get_available_storyboards(self) -> List[str]:
@@ -656,11 +657,11 @@ Die Auswahl für diesen Shot wird gelöscht."""
             missing_ids = sorted(all_shot_ids - selected_ids)
             missing_list = ", ".join(missing_ids[:5])
             if len(missing_ids) > 5:
-                missing_list += f" (+{len(missing_ids) - 5} weitere)"
+                missing_list += f" (+{len(missing_ids) - 5} more)"
 
             warning_text = (
-                f"**⚠️ Unvollständige Auswahl**\n\n"
-                f"{missing} von {total_shots} Shots fehlen:\n"
+                f"**⚠️ Incomplete Selection**\n\n"
+                f"{missing} of {total_shots} shots missing:\n"
                 f"`{missing_list}`"
             )
             return gr.update(visible=True, value=warning_text)

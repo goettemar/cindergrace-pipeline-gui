@@ -1,5 +1,304 @@
 # CINDERGRACE GUI - Changelog
 
+## [0.9.0] - December 21, 2025 - ✅ WORKING
+
+### 🎬 LTX-Video Support & Model Selection
+
+#### New Features:
+
+**1. LTX-Video Integration (Low VRAM)**
+- ✅ Native ComfyUI nodes (kein Custom Node Pack nötig)
+- ✅ 6-8GB VRAM ausreichend (vs 12GB+ für Wan 2.2)
+- ✅ Flexible Auflösungen (768x512, 512x768, 512x512)
+- ✅ Workflow: `gcv_ltvx_i2v.json`
+
+**2. Video Model Dropdown**
+- ✅ Model-Auswahl im Video Generator
+- ✅ Dynamisch basierend auf `.models` Datei
+- ✅ Unterstützt UNETLoader, UnetLoaderGGUF, CheckpointLoaderSimple
+- ✅ Nur installierte Modelle werden angezeigt
+
+**3. Dataset Generator Workflow-Auswahl**
+- ✅ Workflow-Dropdown für gcl_* Workflows
+- ✅ Service unterstützt dynamische Workflow-Auswahl
+- ✅ `gcl_qwen_image_edit_2509.models` Datei erstellt
+
+**4. Resolution Guide Komponente**
+- ✅ Collapsible Accordion im Project Tab
+- ✅ Matrix für Wan 2.2 und LTX-Video Auflösungen
+- ✅ VRAM-Empfehlungen pro Auflösung
+
+**5. Neue LTX-Video Updaters**
+- ✅ `LTXVLatentUpdater` - EmptyLTXVLatentVideo, LTXVImgToVideo
+- ✅ `SamplerCustomUpdater` - SamplerCustom für LTX
+- ✅ `SaveAnimatedWEBPUpdater` - WEBP Output
+
+#### Files Changed:
+- `addons/video_generator.py` - Model dropdown + Helper
+- `addons/dataset_generator.py` - Workflow dropdown
+- `addons/project_panel.py` - LTX resolution presets
+- `addons/components/resolution_guide.py` - NEW: Resolution Guide
+- `services/character_trainer_service.py` - Dynamic workflow
+- `services/keyframe/workflow_utils.py` - Extended inject_model_override
+- `infrastructure/comfy_api/updaters.py` - LTX-Video updaters
+- `infrastructure/config_manager.py` - LTX resolution presets
+- `config/workflow_templates/gcv_ltvx_i2v.json` - NEW
+- `config/workflow_templates/gcv_ltvx_i2v.models` - NEW
+- `config/workflow_templates/gcl_qwen_image_edit_2509.models` - NEW
+
+#### Technical Details:
+
+| Model | VRAM | Auflösungen | Qualität |
+|-------|------|-------------|----------|
+| Wan 2.2 14B | 12GB+ | 16:9 / 9:16 | ⭐⭐⭐ Beste |
+| LTX-Video 2B | 6-8GB | Flexibel (÷32) | ⭐⭐ Gut |
+| LTX-Video 13B-dev | 12GB+ | Flexibel (÷32) | ⭐⭐⭐ Sehr gut |
+
+---
+
+## [0.8.0] - December 20, 2025 - ✅ WORKING
+
+### 🎨 Multi-Model LoRA Training (FLUX + SDXL + SD3)
+
+#### New Features:
+
+**1. Multi-Model Support**
+- ✅ **FLUX** - Diffusion Transformer (beste Qualität, 16GB+ VRAM)
+- ✅ **SDXL** - Stable Diffusion XL (schneller, ab 8GB VRAM)
+- ✅ **SD3** - Stable Diffusion 3 (hohe Qualität, ab 8GB VRAM)
+
+**2. Dynamische UI**
+- ✅ Model-Typ Dropdown (FLUX/SDXL/SD3)
+- ✅ VRAM-Presets aktualisieren sich automatisch je Model-Typ
+- ✅ Base Model Dropdown zeigt nur passende Modelle
+- ✅ T5XXL Encoder wird bei SDXL automatisch ausgeblendet
+
+**3. VRAM-Presets erweitert**
+- ✅ 8GB Preset für SDXL und SD3
+- ✅ Model-spezifische Optimierungen (Resolution, Network Dim, Optimizer)
+
+**4. Bugfixes**
+- ✅ SDXL: `network_train_unet_only = true` hinzugefügt (behebt AssertionError)
+- ✅ SD3: `network_train_unet_only = true` hinzugefügt
+- ✅ Log-Parser: False Positives für "ar error" und "accelerator" behoben
+
+#### Files Changed:
+- `services/kohya/models.py` - KohyaModelType Enum, erweiterte Presets
+- `services/kohya/config_builder.py` - TOML-Generierung für SDXL/SD3
+- `services/kohya/training_runner.py` - Script-Auswahl basierend auf Model-Typ
+- `services/kohya/model_scanner.py` - Neue Scan-Methoden für SDXL/SD3
+- `services/kohya_trainer_service.py` - model_type Parameter
+- `addons/character_trainer.py` - Dynamische UI für Multi-Model
+- `docs/addons/CHARACTER_TRAINER.md` - Dokumentation erweitert
+
+#### Technical Details:
+
+| Model | Training Script | Network Module | Min VRAM |
+|-------|-----------------|----------------|----------|
+| FLUX | `flux_train_network.py` | `networks.lora_flux` | 16GB |
+| SDXL | `sdxl_train_network.py` | `networks.lora` | 8GB |
+| SD3 | `sd3_train_network.py` | `networks.lora_sd3` | 8GB |
+
+---
+
+## [0.7.0] - December 17, 2025 - ✅ WORKING
+
+### 🔥 Kohya Training Only - ComfyUI Training Removed
+
+#### Breaking Changes:
+
+**1. ComfyUI LoRA Training Tab entfernt**
+- ❌ Tab "Phase 3: LoRA Training (ComfyUI)" wurde vollständig entfernt
+- ❌ FluxTrainer-basiertes Training nicht mehr unterstützt
+- ✅ Nur noch Kohya sd-scripts für LoRA Training
+
+**2. Kohya Training Verbesserungen**
+- ✅ Konfigurierbare Model-Auswahl (FLUX + T5XXL)
+- ✅ Automatisches Scannen verfügbarer Modelle
+- ✅ FP8-Modelle werden bevorzugt für 16GB VRAM
+- ✅ Korrigiertes TOML-Format (separate Dataset-Config)
+- ✅ Bilder müssen direkt im Ordner liegen (keine Unterordner)
+
+**3. Neue UI-Elemente im Kohya Tab**
+- ✅ FLUX Base Model Dropdown
+- ✅ T5XXL Text Encoder Dropdown
+- ✅ Models Refresh Button
+
+#### Migration:
+
+Wenn Sie vorher ComfyUI-basiertes Training verwendet haben:
+1. Nutzen Sie nun den "Kohya Training" Tab
+2. Wählen Sie Ihre bevorzugten Modelle in den Erweiterten Einstellungen
+3. FP8-Modelle empfohlen für 16GB VRAM
+
+#### Files Changed:
+- `addons/character_trainer.py` - ComfyUI Tab entfernt, Kohya erweitert
+- `services/kohya_trainer_service.py` - Model scanning, configurable paths
+- `docs/addons/CHARACTER_TRAINER.md` - Dokumentation aktualisiert
+
+---
+
+## [0.6.1] - December 16, 2025 - ✅ WORKING
+
+### 🌐 Google Colab Integration & Multi-Backend Support
+
+#### New Features:
+
+**1. Multi-Backend System**
+- ✅ Unterstützung für mehrere ComfyUI-Backends (lokal + Cloud)
+- ✅ Einfaches Wechseln zwischen Backends im Settings-Tab
+- ✅ Backend-Indikator im Header zeigt aktives Backend
+- **ConfigManager:** Neue Methoden `get_backends()`, `add_backend()`, `set_active_backend()`
+
+**2. Google Colab Support**
+- ✅ Optimiertes Colab-Notebook für CINDERGRACE
+- ✅ Cloudflare Tunnel für Fernzugriff (keine ngrok-Registrierung nötig)
+- ✅ Google Drive Integration für persistente Modelle
+- ✅ Optional: FluxTrainer-Fork Installation
+- **Location:** `colab/Cindergrace_ComfyUI.ipynb`
+
+**3. Settings Panel Überarbeitung**
+- ✅ Backend-Auswahl Dropdown mit Wechsel-Button
+- ✅ Verbindungstest für aktives Backend
+- ✅ "Backend hinzufügen" Dialog für Colab-URLs
+- ✅ Lokales Backend separat konfigurierbar
+
+**4. FluxTrainer Fork**
+- ✅ Fork erstellt für Cindergrace-spezifische Fixes
+- ✅ PyTorch 2.8 Kompatibilität geplant
+- ✅ 16GB VRAM Optimierungen dokumentiert
+- **Repository:** `github.com/goettemar/ComfyUI-FluxTrainer-Cindergrace`
+
+#### Usage:
+
+1. **Colab starten:**
+   - `colab/Cindergrace_ComfyUI.ipynb` in Google Colab öffnen
+   - GPU auswählen (T4 kostenlos, H100 für Training)
+   - Alle Zellen ausführen
+   - Cloudflare-URL kopieren
+
+2. **Backend in CINDERGRACE hinzufügen:**
+   - Settings → Backend hinzufügen
+   - Name: "Colab T4" / "Colab H100"
+   - URL: Cloudflare-URL einfügen
+   - Typ: Remote/Colab
+   - Wechseln & Testen
+
+---
+
+## [0.6.0] - December 14, 2025 - ✅ WORKING
+
+### 🏗️ Architecture Refactoring - SQLite Migration & Preset System
+
+#### Major Changes:
+
+**1. SQLite für ProjectStore**
+- ✅ Projekt-Metadaten in SQLite-Datenbank statt JSON-Dateien
+- ✅ Bessere Concurrency und Datenkonsistenz
+- ✅ Automatische Migration bestehender Projekte
+- **Location:** `data/projects.db`
+
+**2. PresetService mit SQLite**
+- ✅ 64 Presets in 8 Kategorien (style, lighting, mood, time_of_day, composition, color_grade, camera, motion)
+- ✅ Auto-Seeding der Datenbank beim ersten Start
+- ✅ Prompt-Expansion mit kombinierten Preset-Texten
+- **Location:** `data/presets.db`
+- **Service:** `infrastructure/preset_service.py`
+
+**3. Storyboard Format v2.0**
+- ✅ Neue Struktur mit `presets`, `flux`, `wan` Objekten
+- ✅ Legacy-Felder entfernt (camera_movement, wan_motion, seed, cfg_scale, steps)
+- ✅ Render-Settings pro Shot (flux/wan Seeds, CFG, Steps)
+- **Beispiel:**
+```json
+{
+  "shot_id": "001",
+  "presets": {
+    "style": "cinematic",
+    "lighting": "golden_hour",
+    "mood": "epic"
+  },
+  "flux": {"seed": -1, "cfg": 7.0, "steps": 20},
+  "wan": {"seed": -1, "cfg": 7.0, "steps": 20, "motion_strength": 0.4}
+}
+```
+
+**4. Storyboard Editor 3-Tab Struktur**
+- ✅ Tab 1: Shot-Liste mit Übersicht
+- ✅ Tab 2: Shot-Details (Prompt, Description, Presets)
+- ✅ Tab 3: Render-Settings (Flux/Wan Parameter)
+- ✅ Preset-Dropdowns für alle 8 Kategorien
+- ✅ Full Prompt Preview mit expandierten Presets
+
+**5. Workflow Templates Umbenannt**
+- `flux_preview_fast.json` → `flux_test_schnell.json` (🧪 Test)
+- `flux_test_simple.json` → `flux_keyframe_hq.json` (🎬 HQ)
+- Klarere Unterscheidung: Test (schnell, niedrige Qualität) vs. Production (HQ)
+
+**6. Keyframe Selector UI Refactoring**
+- ✅ "Auswahl Speichern" → "💾 Shot Variante speichern"
+- ✅ Neu: "🗑️ Shot Variante entfernen" mit Bestätigungsdialog
+- ✅ "📤 Shot Auswahl speichern" für Video Generator Export
+- ✅ Radio-Element "Beste Variante auswählen" nach links in Sidebar verschoben
+- ✅ Captions unter Gallery-Bildern (v1, v2, v3...)
+- ✅ Warnung bei unvollständiger Auswahl (X/Y Shots fehlen)
+- ✅ X/Y Format in Auswahlübersicht
+
+#### New Files:
+```
+data/
+├── projects.db                      ✅ SQLite für Projekte
+├── presets.db                       ✅ SQLite für Presets
+└── templates/
+    └── storyboard_beispiel.json     ✅ Beispiel-Storyboard v2.0
+
+infrastructure/
+└── preset_service.py                ✅ Preset-Management Service
+
+services/
+└── storyboard_editor_service.py     ✅ Storyboard CRUD Service
+
+addons/
+└── storyboard_editor.py             ✅ 3-Tab Storyboard Editor
+
+config/workflow_templates/
+├── flux_test_schnell.json           ✅ Umbenannt (vorher flux_preview_fast)
+└── flux_keyframe_hq.json            ✅ Umbenannt (vorher flux_test_simple)
+```
+
+#### Updated Files:
+```
+infrastructure/project_store.py      ✅ SQLite Backend
+config/workflow_presets.json         ✅ Neue Namen mit Emojis
+addons/keyframe_selector.py          ✅ UI Refactoring
+data/templates/storyboard_beispiel.json ✅ v2.0 Format
+docs/BACKLOG.md                      ✅ #028 Gallery Caption Position
+```
+
+#### Breaking Changes:
+- ⚠️ Storyboard-Format v2.0 nicht abwärtskompatibel
+- ⚠️ Alte Storyboards müssen auf neues Format migriert werden
+- ⚠️ Legacy-Felder (camera_movement, wan_motion) werden nicht mehr unterstützt
+
+#### Tests:
+- 417 Unit Tests bestanden
+- Test-Coverage: 52%
+
+---
+
+## [0.5.0] - December 13, 2025 - ✅ WORKING
+
+### 🎬 Phase 3b - LastFrame Extension & Project Management
+
+#### Implemented Features:
+- ✅ **LastFrame Chaining** - Shots >3s werden in Segmente aufgeteilt
+- ✅ **Project Management Tab** - Projekte erstellen/auswählen
+- ✅ **Settings Tab** - ComfyUI URL, Pfade, Workflow-Presets
+- ✅ **State Persistence** - UI-State überlebt Browser-Refresh
+- ✅ **Model Validation** - Prüft fehlende Wan-Modelle vor Generation
+
+---
+
 ## [0.4.0] - December 13, 2024 - ✅ WORKING
 
 ### 🎥 Phase 3 Beta - Wan Video Generator Addon
@@ -245,18 +544,16 @@ numpy>=1.24.0
 
 ## Roadmap
 
-### [0.5.0] - Next Release (Planned)
-- 🔮 **LastFrame Extension** - Phase 3b der Pipeline
-  - Mehr als 3 Sek. via Segment-Chaining
-  - Automatischer Import der Endframes als Startframes für Segment 2+
-  - Segment-Status + Resume
-  - Erweiterte Video-Metadaten (`timeline.json`)
+### [0.7.0] - Next Release (Planned)
+- 🔮 **Stop/Abort Button** - Generation abbrechen
+- 🔮 **Refresh Safety** - State-Persistence für Keyframe Generator
+- 🔮 **Help System** - Tooltips + Modals für alle Tabs
+- 🔮 **Setup Wizard** - Erstnutzer-Konfiguration
 
-### [0.6.0] - Future Release (Planned)
-- 🔮 **Timeline/Video Enhancements**
-  - Bulk review UX improvements
-  - Placeholder thumbnails for missing shots
-  - Integration mit Postproduktion / Export
+### [0.8.0] - Future Release (Planned)
+- 🔮 **Live Progress Updates** - Echtzeit-Fortschritt im UI
+- 🔮 **Code Quality** - Addon-Refactoring, Method-Extraktion
+- 🔮 **Timeline/Video Enhancements** - Bulk review, Placeholder thumbnails
 
 ---
 
@@ -278,6 +575,6 @@ cd cindergrace_gui
 
 ---
 
-**Current Version:** 0.4.0 (WORKING)
-**Status:** ✅ Phase 3 Beta - Keyframe Generator + Selector + Video Generator
-**Ready for:** Phase 3b development (LastFrame Extension)
+**Current Version:** 0.9.0 (WORKING)
+**Status:** ✅ LTX-Video Support + Model Selection + Workflow Dropdown
+**Ready for:** v1.0.0 - Production Release, ECHO NULL Demo Video

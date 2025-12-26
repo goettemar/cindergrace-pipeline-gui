@@ -1,0 +1,92 @@
+{
+  "project": "Quick Demo",
+  "description": "A quick 3-shot demo storyboard. All shots under 3 seconds - perfect for testing the pipeline.",
+  "version": "2.1",
+  "shots": [
+    {
+      "shot_id": "001",
+      "filename_base": "ocean-waves",
+      "description": "Opening: Dramatic ocean waves crashing on rocks",
+      "prompt": "powerful ocean waves crashing against dark volcanic rocks, sea spray in golden sunset light, dramatic coastal scenery, cinematic wide shot",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "golden_hour",
+        "mood": "dramatic",
+        "composition": "wide_shot",
+        "camera": "static",
+        "motion": "dynamic"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.6
+      },
+      "duration": 2.5
+    },
+    {
+      "shot_id": "002",
+      "filename_base": "lighthouse-beam",
+      "description": "Middle: Lighthouse beam cutting through fog",
+      "prompt": "majestic lighthouse at dusk, powerful light beam rotating through thick fog, moody atmospheric scene, coastal cliffs, cinematic lighting",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "volumetric",
+        "mood": "mysterious",
+        "composition": "rule_of_thirds",
+        "camera": "slow_pan",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.4
+      },
+      "duration": 3.0
+    },
+    {
+      "shot_id": "003",
+      "filename_base": "starry-sky",
+      "description": "Closing: Stars appearing over calm ocean",
+      "prompt": "breathtaking starry night sky over peaceful ocean, milky way visible, gentle waves reflecting starlight, serene atmosphere, long exposure style",
+      "negative_prompt": "blurry, low quality, distorted, text, watermark, clouds",
+      "presets": {
+        "style": "photorealistic",
+        "lighting": "night",
+        "mood": "peaceful",
+        "composition": "centered",
+        "camera": "static",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 5.0,
+        "steps": 20,
+        "motion_strength": 0.3
+      },
+      "duration": 3.0
+    }
+  ],
+  "video_settings": {
+    "default_fps": 16,
+    "max_segment_duration": 3.0
+  }
+}

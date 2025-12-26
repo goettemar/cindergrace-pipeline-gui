@@ -2,7 +2,8 @@
 import os
 import sys
 from datetime import datetime
-from typing import List, Tuple, Dict, Any
+from pathlib import Path
+from typing import List, Tuple, Dict, Any, Optional
 
 import gradio as gr
 import pandas as pd
@@ -15,6 +16,7 @@ except ImportError:  # pragma: no cover - plotly optional in runtime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.base_addon import BaseAddon
+from addons.components import format_project_status
 from infrastructure.config_manager import ConfigManager
 from infrastructure.logger import get_logger
 from services.model_manager import (
@@ -28,6 +30,8 @@ from services.model_manager import (
     WorkflowMapper,
     ReportExporter,
     ModelFilter,
+    ModelDownloader,
+    DownloadStatus,
 )
 
 logger = get_logger(__name__)
@@ -64,14 +68,145 @@ class ModelManagerAddon(BaseAddon):
         self.last_classification = None
         self.last_duplicates = []
 
+        # Downloader
+        self.model_downloader = None
+
+        # Workflow templates directory
+        self.workflow_templates_dir = Path(__file__).parent.parent / "config" / "workflow_templates"
+
     def get_tab_name(self) -> str:
-        return "🗂️ Model Manager"
+        return "🗂️ Models"
+
+    # ------------------------------------------------------------------ #
+    # Workflow Model Requirements (.models configurator)
+    # ------------------------------------------------------------------ #
+    def _get_workflow_choices(self) -> List[str]:
+        """Get list of available workflows from templates directory."""
+        if not self.workflow_templates_dir.exists():
+            return []
+        workflows = []
+        for f in sorted(self.workflow_templates_dir.glob("*.json")):
+            workflows.append(f.stem)
+        return workflows
+
+    def _get_models_file_path(self, workflow_name: str) -> Path:
+        """Get the .models file path for a workflow."""
+        return self.workflow_templates_dir / f"{workflow_name}.models"
+
+    def _load_models_file(self, workflow_name: str) -> Tuple[str, str]:
+        """Load .models file content for a workflow.
+
+        Returns:
+            Tuple of (content, status_message)
+        """
+        if not workflow_name:
+            return "", "Wähle einen Workflow aus"
+
+        models_path = self._get_models_file_path(workflow_name)
+
+        if models_path.exists():
+            try:
+                content = models_path.read_text(encoding="utf-8")
+                model_count = len([l for l in content.strip().split("\n") if l.strip() and not l.strip().startswith("#")])
+                return content, f"✅ {model_count} Modell(e) konfiguriert"
+            except Exception as e:
+                logger.error(f"Failed to load {models_path}: {e}")
+                return "", f"❌ Fehler beim Laden: {e}"
+        else:
+            # Create default template
+            default_content = f"# Modelle für {workflow_name}\n# Pfade relativ zu ComfyUI/models/\n\n"
+            return default_content, "📝 Neue .models Datei (noch nicht gespeichert)"
+
+    def _save_models_file(self, workflow_name: str, content: str) -> str:
+        """Save .models file content for a workflow."""
+        if not workflow_name:
+            return "❌ Kein Workflow ausgewählt"
+
+        models_path = self._get_models_file_path(workflow_name)
+
+        try:
+            models_path.write_text(content, encoding="utf-8")
+            model_count = len([l for l in content.strip().split("\n") if l.strip() and not l.strip().startswith("#")])
+            logger.info(f"Saved {models_path} with {model_count} models")
+            return f"✅ Gespeichert: {models_path.name} ({model_count} Modell(e))"
+        except Exception as e:
+            logger.error(f"Failed to save {models_path}: {e}")
+            return f"❌ Fehler beim Speichern: {e}"
+
+    def _get_available_models_for_dropdown(self) -> List[str]:
+        """Get list of available models from ComfyUI for dropdown selection."""
+        if not self.last_classification:
+            return ["-- Zuerst 'Analyze Models' ausführen --"]
+
+        models = []
+        for status, model_list in self.last_classification.items():
+            for model in model_list:
+                # Format: type/filename (e.g., checkpoints/model.safetensors)
+                model_path = f"{model['type']}/{model['filename']}"
+                if model_path not in models:
+                    models.append(model_path)
+
+        return sorted(models) if models else ["-- Keine Modelle gefunden --"]
+
+    def _add_model_to_content(self, workflow_name: str, current_content: str, model_to_add: str) -> Tuple[str, str]:
+        """Add a model path to the .models content."""
+        if not model_to_add or model_to_add.startswith("--"):
+            return current_content, "⚠️ Kein Modell ausgewählt"
+
+        # Check if already in content
+        lines = current_content.strip().split("\n") if current_content.strip() else []
+        for line in lines:
+            if line.strip() == model_to_add:
+                return current_content, f"⚠️ Modell bereits vorhanden: {model_to_add}"
+
+        # Add to content
+        if current_content.strip():
+            new_content = current_content.rstrip() + "\n" + model_to_add + "\n"
+        else:
+            new_content = f"# Modelle für {workflow_name}\n# Pfade relativ zu ComfyUI/models/\n\n{model_to_add}\n"
+
+        return new_content, f"✅ Hinzugefügt: {model_to_add}"
+
+    def _remove_model_from_content(self, current_content: str, model_to_remove: str) -> Tuple[str, str]:
+        """Remove a model path from the .models content."""
+        if not model_to_remove or model_to_remove.startswith("--"):
+            return current_content, "⚠️ Kein Modell zum Entfernen ausgewählt"
+
+        lines = current_content.split("\n")
+        new_lines = []
+        removed = False
+
+        for line in lines:
+            if line.strip() == model_to_remove:
+                removed = True
+            else:
+                new_lines.append(line)
+
+        if removed:
+            return "\n".join(new_lines), f"✅ Entfernt: {model_to_remove}"
+        else:
+            return current_content, f"⚠️ Modell nicht gefunden: {model_to_remove}"
+
+    def _get_models_in_content(self, content: str) -> List[str]:
+        """Get list of model paths from .models content for removal dropdown."""
+        if not content:
+            return ["-- Keine Modelle --"]
+
+        models = []
+        for line in content.split("\n"):
+            line = line.strip()
+            if line and not line.startswith("#"):
+                models.append(line)
+
+        return models if models else ["-- Keine Modelle --"]
 
     def render(self) -> gr.Blocks:
         """Render the Model Manager UI"""
 
         with gr.Blocks() as interface:
-            gr.Markdown("# 🗂️ Model Manager")
+            # Unified header: Tab name left, no project relation
+            gr.HTML(format_project_status(tab_name="🗂️ Model Manager", no_project_relation=True))
+
             gr.Markdown("Analyze workflows, classify models, and manage your ComfyUI model files")
 
             status_text = gr.Markdown("**Status:** Ready - Configure paths and click 'Analyze'")
@@ -163,6 +298,19 @@ class ModelManagerAddon(BaseAddon):
 
                 refresh_btn = gr.Button("🔄 Refresh List", variant="secondary")
 
+                filter_inputs = [
+                    status_filter,
+                    type_filter,
+                    search_box,
+                    size_min,
+                    size_max,
+                    workflow_min,
+                    workflow_max,
+                    date_after,
+                    date_before,
+                    filename_regex,
+                ]
+
                 models_dataframe = gr.Dataframe(
                     headers=["Select", "Filename", "Type", "Status", "Size", "Workflows", "Path"],
                     datatype=["bool", "str", "str", "str", "str", "str", "str"],
@@ -235,6 +383,110 @@ class ModelManagerAddon(BaseAddon):
                     interactive=False,
                 )
 
+            # Download Missing Models
+            with gr.Accordion("⬇️ Download Missing Models", open=False):
+                gr.Markdown("Search and download missing models from Civitai and Huggingface")
+
+                with gr.Row():
+                    civitai_key_input = gr.Textbox(
+                        label="Civitai API Key",
+                        value=self.config.get_civitai_api_key(),
+                        placeholder="Optional - for higher rate limits",
+                        type="password",
+                        scale=2
+                    )
+                    hf_token_input = gr.Textbox(
+                        label="Huggingface Token",
+                        value=self.config.get_huggingface_token(),
+                        placeholder="Optional - for private repos",
+                        type="password",
+                        scale=2
+                    )
+                    parallel_downloads = gr.Slider(
+                        minimum=1,
+                        maximum=5,
+                        value=self.config.get_max_parallel_downloads(),
+                        step=1,
+                        label="Parallel Downloads",
+                        scale=1
+                    )
+
+                save_download_settings_btn = gr.Button("💾 Save Download Settings", variant="secondary", size="sm")
+
+                gr.Markdown("---")
+
+                with gr.Row():
+                    search_missing_btn = gr.Button("🔍 Search Missing Models", variant="primary")
+                    download_all_btn = gr.Button("⬇️ Download All Found", variant="secondary")
+                    cancel_downloads_btn = gr.Button("⏹️ Cancel Downloads", variant="stop")
+
+                download_status_text = gr.Markdown("**Status:** Run 'Analyze Models' first to identify missing models")
+
+                download_progress = gr.Progress()
+
+                download_table = gr.Dataframe(
+                    headers=["Filename", "Type", "Status", "Source", "Size", "Progress"],
+                    datatype=["str", "str", "str", "str", "str", "str"],
+                    column_count=(6, "fixed"),
+                    label="Download Queue",
+                    interactive=False,
+                    wrap=True
+                )
+
+            # Workflow Model Requirements (.models Configurator)
+            with gr.Accordion("📋 Workflow Model Requirements", open=False):
+                gr.Markdown("""### Workflow-Modelle konfigurieren
+
+Hier kannst du die benötigten Modelle für jeden Workflow festlegen.
+Diese Informationen werden im Keyframe Generator verwendet, um die richtigen Modelle anzuzeigen.
+
+**Format:** `model_type/filename` (z.B. `checkpoints/flux1-dev.safetensors`)
+""")
+
+                with gr.Row():
+                    wf_models_workflow_dropdown = gr.Dropdown(
+                        choices=self._get_workflow_choices(),
+                        label="Workflow auswählen",
+                        info="Workflows aus config/workflow_templates/",
+                        scale=2,
+                    )
+                    wf_models_refresh_workflows_btn = gr.Button("🔄", scale=0, size="sm")
+
+                wf_models_status = gr.Markdown("Wähle einen Workflow aus")
+
+                wf_models_content = gr.TextArea(
+                    label=".models Datei Inhalt",
+                    placeholder="# Kommentare beginnen mit #\n# Modellpfade relativ zu ComfyUI/models/\n\ncheckpoints/model.safetensors",
+                    lines=8,
+                    interactive=True,
+                )
+
+                gr.Markdown("### Modell hinzufügen")
+                gr.Markdown("*Tipp: Führe zuerst 'Analyze Models' aus, um verfügbare Modelle zu sehen.*")
+
+                with gr.Row():
+                    wf_models_add_dropdown = gr.Dropdown(
+                        choices=self._get_available_models_for_dropdown(),
+                        label="Modell aus ComfyUI hinzufügen",
+                        scale=3,
+                    )
+                    wf_models_add_btn = gr.Button("➕ Hinzufügen", variant="secondary", scale=1)
+
+                gr.Markdown("### Modell entfernen")
+
+                with gr.Row():
+                    wf_models_remove_dropdown = gr.Dropdown(
+                        choices=["-- Keine Modelle --"],
+                        label="Modell zum Entfernen auswählen",
+                        scale=3,
+                    )
+                    wf_models_remove_btn = gr.Button("➖ Entfernen", variant="secondary", scale=1)
+
+                with gr.Row():
+                    wf_models_save_btn = gr.Button("💾 Speichern", variant="primary", size="lg")
+
+                wf_models_save_status = gr.Markdown("")
+
             # Event Handlers
             save_settings_btn.click(
                 fn=self.save_settings,
@@ -260,53 +512,20 @@ class ModelManagerAddon(BaseAddon):
 
             refresh_btn.click(
                 fn=self.filter_models,
-                inputs=[
-                    status_filter,
-                    type_filter,
-                    search_box,
-                    size_min,
-                    size_max,
-                    workflow_min,
-                    workflow_max,
-                    date_after,
-                    date_before,
-                    filename_regex,
-                ],
+                inputs=filter_inputs,
                 outputs=[models_dataframe]
             )
 
             for comp in [status_filter, type_filter, search_box]:
                 comp.change(
                     fn=self.filter_models,
-                    inputs=[
-                        status_filter,
-                        type_filter,
-                        search_box,
-                        size_min,
-                        size_max,
-                        workflow_min,
-                        workflow_max,
-                        date_after,
-                        date_before,
-                        filename_regex,
-                    ],
+                    inputs=filter_inputs,
                     outputs=[models_dataframe]
                 )
 
             apply_filters_btn.click(
                 fn=self.filter_models,
-                inputs=[
-                    status_filter,
-                    type_filter,
-                    search_box,
-                    size_min,
-                    size_max,
-                    workflow_min,
-                    workflow_max,
-                    date_after,
-                    date_before,
-                    filename_regex,
-                ],
+                inputs=filter_inputs,
                 outputs=[models_dataframe]
             )
 
@@ -354,7 +573,7 @@ class ModelManagerAddon(BaseAddon):
 
             export_filtered_btn.click(
                 fn=self.export_filtered_models,
-                inputs=[export_format, export_path, status_filter, type_filter, search_box, size_min, size_max, workflow_min, workflow_max, date_after, date_before, filename_regex],
+                inputs=[export_format, export_path, *filter_inputs],
                 outputs=[export_status]
             )
 
@@ -375,6 +594,107 @@ class ModelManagerAddon(BaseAddon):
                 fn=self.populate_workflow_tables,
                 inputs=[],
                 outputs=[most_used_table, single_use_table, workflow_complexity_table]
+            )
+
+            # Download Event Handlers
+            save_download_settings_btn.click(
+                fn=self.save_download_settings,
+                inputs=[civitai_key_input, hf_token_input, parallel_downloads],
+                outputs=[download_status_text]
+            )
+
+            search_missing_btn.click(
+                fn=self.search_missing_models,
+                inputs=[civitai_key_input, hf_token_input, parallel_downloads],
+                outputs=[download_status_text, download_table]
+            )
+
+            download_all_btn.click(
+                fn=self.download_all_found,
+                inputs=[],
+                outputs=[download_status_text, download_table]
+            )
+
+            cancel_downloads_btn.click(
+                fn=self.cancel_downloads,
+                inputs=[],
+                outputs=[download_status_text]
+            )
+
+            # Workflow Model Requirements Event Handlers
+            def on_workflow_select(workflow_name):
+                content, status = self._load_models_file(workflow_name)
+                remove_choices = self._get_models_in_content(content)
+                return content, status, gr.update(choices=remove_choices, value=None)
+
+            def on_refresh_workflows():
+                choices = self._get_workflow_choices()
+                logger.info(f"Workflow Model Requirements - Refresh: {len(choices)} workflows found")
+                for c in choices:
+                    logger.debug(f"  - {c}")
+                return gr.update(choices=choices, value=None)
+
+            def on_add_model(workflow_name, content, model_to_add):
+                new_content, status = self._add_model_to_content(workflow_name, content, model_to_add)
+                remove_choices = self._get_models_in_content(new_content)
+                return new_content, status, gr.update(choices=remove_choices, value=None)
+
+            def on_remove_model(content, model_to_remove):
+                new_content, status = self._remove_model_from_content(content, model_to_remove)
+                remove_choices = self._get_models_in_content(new_content)
+                return new_content, status, gr.update(choices=remove_choices, value=None)
+
+            def on_save_models(workflow_name, content):
+                return self._save_models_file(workflow_name, content)
+
+            def on_content_change(content):
+                """Update remove dropdown when content changes."""
+                remove_choices = self._get_models_in_content(content)
+                return gr.update(choices=remove_choices, value=None)
+
+            def refresh_add_dropdown():
+                """Refresh add dropdown with available models after analysis."""
+                return gr.update(choices=self._get_available_models_for_dropdown(), value=None)
+
+            wf_models_workflow_dropdown.change(
+                fn=on_workflow_select,
+                inputs=[wf_models_workflow_dropdown],
+                outputs=[wf_models_content, wf_models_status, wf_models_remove_dropdown]
+            )
+
+            wf_models_refresh_workflows_btn.click(
+                fn=on_refresh_workflows,
+                outputs=[wf_models_workflow_dropdown]
+            )
+
+            wf_models_add_btn.click(
+                fn=on_add_model,
+                inputs=[wf_models_workflow_dropdown, wf_models_content, wf_models_add_dropdown],
+                outputs=[wf_models_content, wf_models_save_status, wf_models_remove_dropdown]
+            )
+
+            wf_models_remove_btn.click(
+                fn=on_remove_model,
+                inputs=[wf_models_content, wf_models_remove_dropdown],
+                outputs=[wf_models_content, wf_models_save_status, wf_models_remove_dropdown]
+            )
+
+            wf_models_save_btn.click(
+                fn=on_save_models,
+                inputs=[wf_models_workflow_dropdown, wf_models_content],
+                outputs=[wf_models_save_status]
+            )
+
+            wf_models_content.change(
+                fn=on_content_change,
+                inputs=[wf_models_content],
+                outputs=[wf_models_remove_dropdown]
+            )
+
+            # Update add dropdown after analysis
+            analyze_btn.click(
+                fn=refresh_add_dropdown,
+                outputs=[wf_models_add_dropdown]
             )
 
         return interface
@@ -956,3 +1276,181 @@ class ModelManagerAddon(BaseAddon):
         fig.add_bar(x=labels, y=unused, name="Unused")
         fig.update_layout(barmode="stack", margin=dict(l=10, r=10, t=10, b=10))
         return fig
+
+    # ------------------------------------------------------------------ #
+    # Download functionality
+    # ------------------------------------------------------------------ #
+    def save_download_settings(
+        self,
+        civitai_key: str,
+        hf_token: str,
+        parallel_downloads: int
+    ) -> str:
+        """Save download settings to config"""
+        try:
+            self.config.set_civitai_api_key(civitai_key)
+            self.config.set_huggingface_token(hf_token)
+            self.config.set_max_parallel_downloads(int(parallel_downloads))
+
+            # Reinitialize downloader with new settings if it exists
+            if self.model_downloader:
+                self.model_downloader = ModelDownloader(
+                    models_root=self.models_dir,
+                    civitai_api_key=civitai_key,
+                    huggingface_token=hf_token,
+                    max_parallel_downloads=int(parallel_downloads),
+                )
+
+            return "**✅ Download settings saved!**"
+        except Exception as e:
+            logger.error(f"Failed to save download settings: {e}")
+            return f"**❌ Error:** {str(e)}"
+
+    def _init_downloader(self, civitai_key: str, hf_token: str, parallel: int):
+        """Initialize or reinitialize the model downloader"""
+        if not self.models_dir:
+            raise ValueError("Models directory not set. Run 'Analyze Models' first.")
+
+        self.model_downloader = ModelDownloader(
+            models_root=self.models_dir,
+            civitai_api_key=civitai_key,
+            huggingface_token=hf_token,
+            max_parallel_downloads=int(parallel),
+        )
+
+    def search_missing_models(
+        self,
+        civitai_key: str,
+        hf_token: str,
+        parallel_downloads: int
+    ) -> Tuple[str, List]:
+        """Search for all missing models on Civitai and Huggingface"""
+        if not self.last_classification:
+            return "**⚠️ Run 'Analyze Models' first to identify missing models**", []
+
+        missing_models = self.last_classification.get(ModelStatus.MISSING, [])
+        if not missing_models:
+            return "**✅ No missing models found!**", []
+
+        try:
+            # Initialize downloader
+            self._init_downloader(civitai_key, hf_token, parallel_downloads)
+
+            # Search for all missing models
+            logger.info(f"Searching for {len(missing_models)} missing models...")
+
+            for model in missing_models:
+                self.model_downloader.add_to_queue(
+                    filename=model["filename"],
+                    model_type=model["type"],
+                    auto_search=True
+                )
+
+            # Get results
+            stats = self.model_downloader.get_statistics()
+            queue_status = self.model_downloader.get_queue_status()
+
+            # Format table
+            table_data = self._download_queue_to_table(queue_status)
+
+            status_msg = f"""**✅ Search complete!**
+
+- **Found:** {stats['found']} models
+- **Not Found:** {stats['not_found']} models
+- **Pending:** {stats['pending']} models
+
+Click 'Download All Found' to start downloading."""
+
+            return status_msg, table_data
+
+        except Exception as e:
+            logger.error(f"Search failed: {e}", exc_info=True)
+            return f"**❌ Error:** {str(e)}", []
+
+    def download_all_found(self) -> Tuple[str, List]:
+        """Download all models that were found"""
+        if not self.model_downloader:
+            return "**⚠️ Run 'Search Missing Models' first**", []
+
+        stats = self.model_downloader.get_statistics()
+        if stats['found'] == 0:
+            return "**⚠️ No models found to download**", []
+
+        try:
+            logger.info(f"Starting download of {stats['found']} models...")
+
+            # Start downloads in background thread
+            import threading
+
+            def run_downloads():
+                self.model_downloader.start_downloads()
+
+            download_thread = threading.Thread(target=run_downloads, daemon=True)
+            download_thread.start()
+
+            # Wait a moment for downloads to start
+            import time
+            time.sleep(1)
+
+            # Get updated status
+            queue_status = self.model_downloader.get_queue_status()
+            table_data = self._download_queue_to_table(queue_status)
+
+            new_stats = self.model_downloader.get_statistics()
+            status_msg = f"""**⬇️ Downloads started!**
+
+- **Downloading:** {new_stats['downloading']}
+- **Completed:** {new_stats['completed']}
+- **Failed:** {new_stats['failed']}
+
+Downloads are running in the background. Refresh to see progress."""
+
+            return status_msg, table_data
+
+        except Exception as e:
+            logger.error(f"Download failed: {e}", exc_info=True)
+            return f"**❌ Error:** {str(e)}", []
+
+    def cancel_downloads(self) -> str:
+        """Cancel all running downloads"""
+        if not self.model_downloader:
+            return "**⚠️ No downloads to cancel**"
+
+        try:
+            self.model_downloader.cancel_downloads()
+            return "**⏹️ Downloads cancelled**"
+        except Exception as e:
+            logger.error(f"Cancel failed: {e}")
+            return f"**❌ Error:** {str(e)}"
+
+    def _download_queue_to_table(self, queue_status: Dict) -> List:
+        """Convert download queue to table format"""
+        table_data = []
+
+        status_icons = {
+            "pending": "⏳",
+            "searching": "🔍",
+            "found": "✅",
+            "not_found": "❌",
+            "downloading": "⬇️",
+            "completed": "✅",
+            "failed": "❌",
+            "cancelled": "⏹️",
+        }
+
+        for task_id, task in queue_status.items():
+            status = task.get("status", "pending")
+            icon = status_icons.get(status, "")
+            progress = task.get("progress", 0)
+            progress_str = f"{progress:.0f}%" if status == "downloading" else ""
+
+            table_data.append([
+                task.get("filename", ""),
+                task.get("model_type", ""),
+                f"{icon} {status}",
+                task.get("source", "").upper() if task.get("source") else "-",
+                task.get("size", "-"),
+                progress_str,
+            ])
+
+        return table_data

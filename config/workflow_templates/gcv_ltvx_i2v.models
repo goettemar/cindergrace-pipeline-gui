@@ -1,0 +1,5 @@
+# LTX-Video Models
+# Pfade relativ zu ComfyUI/models/
+
+checkpoints/ltx-video-2b-v0.9.5.safetensors
+checkpoints/ltxv-13b-0.9.7-dev-fp8.safetensors

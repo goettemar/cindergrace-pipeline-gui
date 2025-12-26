@@ -31,15 +31,20 @@ def test_base_addon_repr_and_flags():
         def get_tab_name(self):
             return "Dummy"
 
-    # Test default category
+    # Test default category (now "production")
     addon = DummyAddon("Name", "Desc")
     assert addon.enabled is True
-    assert addon.category == "pipeline"
+    assert addon.category == "production"
     assert "DummyAddon" in repr(addon)
 
     # Test custom category
     tool_addon = DummyAddon("Tool", "ToolDesc", category="tools")
     assert tool_addon.category == "tools"
+
+    # Test all valid categories
+    for cat in ["project", "production", "training", "tools"]:
+        cat_addon = DummyAddon("Test", "Test", category=cat)
+        assert cat_addon.category == cat
 
 
 def test_video_generator_addon_init(monkeypatch):
@@ -77,7 +82,7 @@ def test_video_generator_addon_init(monkeypatch):
     )
 
     addon = vg.VideoGeneratorAddon()
-    assert addon.get_tab_name() == "🎥 Video Generator"
+    assert addon.get_tab_name() == "🎥 Video"
     assert addon.max_clip_duration == 3.0
 
 
@@ -97,7 +102,7 @@ def test_keyframe_generator_addon_init(monkeypatch):
     monkeypatch.setattr(kg, "ProjectStore", DummyProjectStore)
 
     addon = kg.KeyframeGeneratorAddon()
-    assert addon.get_tab_name() == "🎬 Keyframe Generator"
+    assert addon.get_tab_name() == "🎬 Keyframes"
     assert addon.project_manager.cfg is addon.config
 
 
@@ -117,7 +122,7 @@ def test_keyframe_selector_addon_init(monkeypatch):
     monkeypatch.setattr(ks, "SelectionService", lambda store: object())
 
     addon = ks.KeyframeSelectorAddon()
-    assert addon.get_tab_name() == "✅ Keyframe Selector"
+    assert addon.get_tab_name() == "✅ Select"
     assert addon.selection_service is not None
 
 
@@ -136,7 +141,7 @@ def test_project_and_settings_addon_init(monkeypatch):
     monkeypatch.setattr(pp, "ConfigManager", DummyConfig)
     monkeypatch.setattr(pp, "ProjectStore", DummyProjectStore)
     proj_addon = pp.ProjectAddon()
-    assert proj_addon.get_tab_name() == "📁 Projekt"
+    assert proj_addon.get_tab_name() == "📁 Project"
 
     monkeypatch.setattr(sp, "ConfigManager", DummyConfig)
     monkeypatch.setattr(sp, "WorkflowRegistry", lambda: object())
@@ -158,9 +163,6 @@ def test_video_generator_render_minimal(monkeypatch):
 
         def get_current_storyboard(self):
             return "sb.json"
-
-        def get_current_project(self):
-            return {"path": "/tmp/project"}
 
         def refresh(self):
             return None

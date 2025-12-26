@@ -10,9 +10,10 @@ import gradio as gr
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.base_addon import BaseAddon
+from addons.components import format_project_status
 from infrastructure.comfy_api import ComfyUIAPI
 from infrastructure.config_manager import ConfigManager
-from infrastructure.workflow_registry import WorkflowRegistry
+from infrastructure.workflow_registry import WorkflowRegistry, PREFIX_KEYFRAME
 
 
 class TestComfyFluxAddon(BaseAddon):
@@ -30,13 +31,15 @@ class TestComfyFluxAddon(BaseAddon):
         self.workflow_registry = WorkflowRegistry()
 
     def get_tab_name(self) -> str:
-        return "🧪 Test ComfyUI"
+        return "🧪 Test"
 
     def render(self) -> gr.Blocks:
         """Render the test addon UI"""
 
         with gr.Blocks() as interface:
-            gr.Markdown("# 🔌 ComfyUI Connection & Keyframe Test")
+            # Unified header: Tab name left, no project relation
+            gr.HTML(format_project_status(tab_name="🔌 ComfyUI Connection Test", no_project_relation=True))
+
             gr.Markdown("Test your local ComfyUI installation and generate keyframe test images")
 
             # Progress Section (always visible)
@@ -47,9 +50,10 @@ class TestComfyFluxAddon(BaseAddon):
                 with gr.Row():
                     comfy_url = gr.Textbox(
                         value=self.config.get_comfy_url(),
-                        label="ComfyUI URL",
+                        label="ComfyUI URL (vom aktiven Backend)",
                         placeholder="http://127.0.0.1:8188"
                     )
+                    refresh_url_btn = gr.Button("🔄", variant="secondary", size="sm", min_width=50)
                     test_conn_btn = gr.Button("🔌 Test Connection", variant="secondary")
 
                 connection_status = gr.Markdown("**Status:** 🔴 Not tested")
@@ -116,6 +120,11 @@ class TestComfyFluxAddon(BaseAddon):
                     # download_btn = gr.Button("📦 Download All as ZIP")
 
             # Event Handlers
+            refresh_url_btn.click(
+                fn=lambda: self.config.get_comfy_url(),
+                outputs=[comfy_url]
+            )
+
             test_conn_btn.click(
                 fn=self.test_connection,
                 inputs=[comfy_url],
@@ -136,6 +145,12 @@ class TestComfyFluxAddon(BaseAddon):
             clear_btn.click(
                 fn=lambda: ([], "**Ready** - Gallery cleared"),
                 outputs=[image_gallery, status_text]
+            )
+
+            # Auto-refresh URL from active backend when tab loads
+            interface.load(
+                fn=lambda: self.config.get_comfy_url(),
+                outputs=[comfy_url]
             )
 
         return interface
@@ -268,14 +283,14 @@ class TestComfyFluxAddon(BaseAddon):
 
     def _get_available_workflows(self) -> List[str]:
         """
-        Get list of available workflow files
+        Get list of available keyframe workflow files (gcp_* prefix)
 
         Returns:
             List of workflow filenames
         """
-        workflows = self.workflow_registry.get_files(category="flux")
-        return workflows if workflows else ["No workflows found - update workflow_presets.json"]
+        workflows = self.workflow_registry.get_files(PREFIX_KEYFRAME)
+        return workflows if workflows else ["No gcp_* workflows found"]
 
     def _get_default_workflow(self) -> Optional[str]:
-        """Get default workflow (first available)"""
-        return self.workflow_registry.get_default(category="flux")
+        """Get default keyframe workflow from SQLite"""
+        return self.workflow_registry.get_default(PREFIX_KEYFRAME)

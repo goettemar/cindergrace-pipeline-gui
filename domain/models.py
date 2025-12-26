@@ -13,6 +13,27 @@ class MotionSettings:
 
 
 @dataclass
+class CharacterReference:
+    """Character LoRA reference in a storyboard.
+
+    Defines a character with optional strength override.
+    The id must match a LoRA filename in the character LoRA directory.
+    """
+    id: str  # Character ID, matches filename (e.g., "elena")
+    strength: float = 0.85  # LoRA strength (0.0 - 1.5)
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, Any]) -> "CharacterReference":
+        if isinstance(payload, str):
+            # Simple string format: just the ID
+            return cls(id=payload)
+        return cls(
+            id=payload.get("id", ""),
+            strength=float(payload.get("strength", 0.85))
+        )
+
+
+@dataclass
 class Shot:
     shot_id: str
     filename_base: str
@@ -21,6 +42,8 @@ class Shot:
     height: int = 576
     duration: float = 3.0
     wan_motion: Optional[MotionSettings] = None
+    character_lora: Optional[str] = None  # Single character LoRA ID (e.g., "cg_elena"), None = no LoRA
+    characters: List[str] = field(default_factory=list)  # Legacy: Character IDs for this shot
     raw: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -31,6 +54,21 @@ class Shot:
             strength=motion_payload.get("strength"),
             notes=motion_payload.get("notes"),
         ) if motion_payload else None
+
+        # Parse character_lora (single LoRA, new format)
+        character_lora = payload.get("character_lora")
+        if character_lora == "" or character_lora == "none":
+            character_lora = None
+
+        # Parse characters (can be list of strings or list of objects) - legacy
+        characters_raw = payload.get("characters", [])
+        characters = []
+        for char in characters_raw:
+            if isinstance(char, str):
+                characters.append(char)
+            elif isinstance(char, dict) and "id" in char:
+                characters.append(char["id"])
+
         return cls(
             shot_id=payload.get("shot_id", ""),
             filename_base=payload.get("filename_base", payload.get("shot_id", "shot")),
@@ -39,6 +77,8 @@ class Shot:
             height=int(payload.get("height", 576)),
             duration=float(payload.get("duration", 3.0)),
             wan_motion=motion,
+            character_lora=character_lora,
+            characters=characters,
             raw=payload,
         )
 
@@ -49,21 +89,42 @@ class Storyboard:
     shots: List[Shot]
     version: Optional[str] = None
     description: Optional[str] = None
+    characters: List[CharacterReference] = field(default_factory=list)  # Available characters
     raw: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "Storyboard":
         shots = [Shot.from_dict(shot) for shot in payload.get("shots", [])]
+
+        # Parse characters (storyboard-level definitions)
+        characters_raw = payload.get("characters", [])
+        characters = [CharacterReference.from_dict(char) for char in characters_raw]
+
         return cls(
             project=payload.get("project", "Unnamed Project"),
             shots=shots,
             version=payload.get("version"),
             description=payload.get("description"),
+            characters=characters,
             raw=payload,
         )
 
     def get_shot(self, shot_id: str) -> Optional[Shot]:
         return next((shot for shot in self.shots if shot.shot_id == shot_id), None)
+
+    def get_character(self, character_id: str) -> Optional[CharacterReference]:
+        """Get a character reference by ID."""
+        return next((char for char in self.characters if char.id == character_id), None)
+
+    def get_characters_for_shot(self, shot_id: str) -> List[CharacterReference]:
+        """Get all character references for a specific shot."""
+        shot = self.get_shot(shot_id)
+        if not shot:
+            return []
+        return [
+            self.get_character(char_id) or CharacterReference(id=char_id)
+            for char_id in shot.characters
+        ]
 
 
 @dataclass
@@ -168,6 +229,7 @@ class GenerationPlan:
 
 __all__ = [
     "MotionSettings",
+    "CharacterReference",
     "Shot",
     "Storyboard",
     "SelectionEntry",

@@ -1,261 +1,14 @@
-"""Unit tests for Video Services (LastFrameExtractor, VideoPlanBuilder)"""
+"""Unit tests for Video Services (VideoPlanBuilder)"""
 import pytest
 import os
-import subprocess
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
-from services.video.last_frame_extractor import LastFrameExtractor
 from services.video.video_plan_builder import VideoPlanBuilder
 from domain.models import (
     Storyboard, Shot, SelectionSet, SelectionEntry,
     MotionSettings, GenerationPlan
 )
-
-
-class TestLastFrameExtractorIsAvailable:
-    """Test LastFrameExtractor.is_available()"""
-
-    @pytest.mark.unit
-    @patch('shutil.which')
-    def test_is_available_when_ffmpeg_exists(self, mock_which):
-        """Should return True when ffmpeg is installed"""
-        # Arrange
-        mock_which.return_value = "/usr/bin/ffmpeg"
-
-        # Act
-        result = LastFrameExtractor.is_available()
-
-        # Assert
-        assert result is True
-        mock_which.assert_called_once_with("ffmpeg")
-
-    @pytest.mark.unit
-    @patch('shutil.which')
-    def test_is_available_when_ffmpeg_missing(self, mock_which):
-        """Should return False when ffmpeg is not installed"""
-        # Arrange
-        mock_which.return_value = None
-
-        # Act
-        result = LastFrameExtractor.is_available()
-
-        # Assert
-        assert result is False
-
-
-class TestLastFrameExtractorExtract:
-    """Test LastFrameExtractor.extract()"""
-
-    @pytest.mark.unit
-    @patch('shutil.which')
-    @patch('subprocess.run')
-    @patch('os.path.exists')
-    @patch('os.path.getsize')
-    def test_extract_success(self, mock_getsize, mock_exists, mock_subprocess, mock_which, tmp_path):
-        """Should extract last frame successfully using frame-number method"""
-        # Arrange
-        cache_dir = tmp_path / "cache"
-        extractor = LastFrameExtractor(str(cache_dir))
-
-        mock_which.return_value = "/usr/bin/ffmpeg"
-        mock_exists.side_effect = lambda path: True  # Video exists, output exists
-        mock_getsize.return_value = 12345  # File has size
-
-        # Mock subprocess calls: first ffprobe (frame count), then ffmpeg (extraction)
-        mock_subprocess.side_effect = [
-            MagicMock(returncode=0, stdout="100\n", stderr=""),  # ffprobe returns 100 frames
-            MagicMock(returncode=0, stdout="", stderr=""),       # ffmpeg extraction succeeds
-        ]
-
-        entry = {"plan_id": "001", "shot_id": "001"}
-        video_path = "/path/to/video.mp4"
-
-        # Act
-        result = extractor.extract(video_path, entry)
-
-        # Assert
-        assert result == str(cache_dir / "001_lastframe.png")
-        assert mock_subprocess.call_count == 2
-
-        # Verify ffprobe command (first call)
-        ffprobe_args = mock_subprocess.call_args_list[0][0][0]
-        assert "ffprobe" in ffprobe_args
-        assert "-count_frames" in ffprobe_args
-
-        # Verify ffmpeg command (second call)
-        ffmpeg_args = mock_subprocess.call_args_list[1][0][0]
-        assert "ffmpeg" in ffmpeg_args
-        assert "-y" in ffmpeg_args
-        assert "select=eq(n\\,99)" in ffmpeg_args  # Last frame = 100-1 = 99
-        assert video_path in ffmpeg_args
-
-    @pytest.mark.unit
-    @patch('shutil.which')
-    def test_extract_ffmpeg_not_available(self, mock_which, tmp_path):
-        """Should return None when ffmpeg is not available"""
-        # Arrange
-        cache_dir = tmp_path / "cache"
-        extractor = LastFrameExtractor(str(cache_dir))
-        mock_which.return_value = None
-
-        entry = {"plan_id": "001"}
-        video_path = "/path/to/video.mp4"
-
-        # Act
-        result = extractor.extract(video_path, entry)
-
-        # Assert
-        assert result is None
-
-    @pytest.mark.unit
-    @patch('shutil.which')
-    @patch('os.path.exists')
-    def test_extract_video_not_found(self, mock_exists, mock_which, tmp_path):
-        """Should return None when video file doesn't exist"""
-        # Arrange
-        cache_dir = tmp_path / "cache"
-        extractor = LastFrameExtractor(str(cache_dir))
-
-        mock_which.return_value = "/usr/bin/ffmpeg"
-        mock_exists.return_value = False  # Video doesn't exist
-
-        entry = {"plan_id": "001"}
-        video_path = "/nonexistent/video.mp4"
-
-        # Act
-        result = extractor.extract(video_path, entry)
-
-        # Assert
-        assert result is None
-
-    @pytest.mark.unit
-    @patch('shutil.which')
-    @patch('subprocess.run')
-    @patch('os.path.exists')
-    def test_extract_ffmpeg_fails(self, mock_exists, mock_subprocess, mock_which, tmp_path):
-        """Should return None when ffmpeg command fails"""
-        # Arrange
-        cache_dir = tmp_path / "cache"
-        extractor = LastFrameExtractor(str(cache_dir))
-
-        mock_which.return_value = "/usr/bin/ffmpeg"
-        mock_exists.side_effect = lambda path: path.endswith(".mp4")  # Only video exists
-
-        # Mock failed subprocess
-        mock_subprocess.side_effect = subprocess.CalledProcessError(
-            returncode=1,
-            cmd=["ffmpeg"],
-            stderr="Error: Invalid file"
-        )
-
-        entry = {"plan_id": "001"}
-        video_path = "/path/to/video.mp4"
-
-        # Act
-        result = extractor.extract(video_path, entry)
-
-        # Assert
-        assert result is None
-
-    @pytest.mark.unit
-    @patch('shutil.which')
-    @patch('subprocess.run')
-    @patch('os.path.exists')
-    @patch('os.path.getsize')
-    def test_extract_uses_shot_id_fallback(self, mock_getsize, mock_exists, mock_subprocess, mock_which, tmp_path):
-        """Should use shot_id if plan_id is missing"""
-        # Arrange
-        cache_dir = tmp_path / "cache"
-        extractor = LastFrameExtractor(str(cache_dir))
-
-        mock_which.return_value = "/usr/bin/ffmpeg"
-        mock_exists.return_value = True
-        mock_getsize.return_value = 12345
-
-        # Mock subprocess calls: ffprobe then ffmpeg
-        mock_subprocess.side_effect = [
-            MagicMock(returncode=0, stdout="50\n", stderr=""),  # ffprobe
-            MagicMock(returncode=0, stdout="", stderr=""),      # ffmpeg
-        ]
-
-        entry = {"shot_id": "002"}  # No plan_id
-        video_path = "/path/to/video.mp4"
-
-        # Act
-        result = extractor.extract(video_path, entry)
-
-        # Assert
-        assert result == str(cache_dir / "002_lastframe.png")
-
-    @pytest.mark.unit
-    def test_extract_creates_cache_dir(self, tmp_path):
-        """Should create cache directory if it doesn't exist"""
-        # Arrange
-        cache_dir = tmp_path / "cache" / "nested"
-        assert not cache_dir.exists()
-
-        # Act
-        extractor = LastFrameExtractor(str(cache_dir))
-
-        # Assert
-        assert cache_dir.exists()
-
-    @pytest.mark.unit
-    @patch('shutil.which')
-    @patch('subprocess.run')
-    @patch('os.path.exists')
-    def test_extract_custom_offset(self, mock_exists, mock_subprocess, mock_which, tmp_path):
-        """Should use custom offset_seconds parameter"""
-        # Arrange
-        cache_dir = tmp_path / "cache"
-        extractor = LastFrameExtractor(str(cache_dir))
-
-        mock_which.return_value = "/usr/bin/ffmpeg"
-        mock_exists.return_value = True
-        mock_subprocess.return_value = MagicMock(returncode=0)
-
-        entry = {"plan_id": "001"}
-        video_path = "/path/to/video.mp4"
-
-        # Act
-        result = extractor.extract(video_path, entry, offset_seconds=0.1)
-
-        # Assert
-        call_args = mock_subprocess.call_args[0][0]
-        assert "-0.1" in call_args  # Check custom offset
-
-    @pytest.mark.unit
-    @patch('shutil.which')
-    @patch('subprocess.run')
-    @patch('os.path.exists')
-    def test_extract_handles_unexpected_exception(self, mock_exists, mock_subprocess, mock_which, tmp_path):
-        """Should return None on unexpected exception"""
-        cache_dir = tmp_path / "cache"
-        extractor = LastFrameExtractor(str(cache_dir))
-
-        mock_which.return_value = "/usr/bin/ffmpeg"
-        mock_exists.return_value = True
-        mock_subprocess.side_effect = RuntimeError("weird error")
-
-        result = extractor.extract("/path/video.mp4", {"plan_id": "001"})
-        assert result is None
-
-    @pytest.mark.unit
-    @patch('shutil.which')
-    @patch('subprocess.run')
-    @patch('os.path.exists')
-    def test_extract_warns_when_target_missing(self, mock_exists, mock_subprocess, mock_which, tmp_path):
-        """Should return None when output file missing after success"""
-        cache_dir = tmp_path / "cache"
-        extractor = LastFrameExtractor(str(cache_dir))
-
-        mock_which.return_value = "/usr/bin/ffmpeg"
-        mock_exists.side_effect = lambda path: path.endswith(".mp4")  # Video exists, target missing
-        mock_subprocess.return_value = MagicMock(returncode=0, stdout="", stderr="")
-
-        result = extractor.extract("/path/video.mp4", {"plan_id": "001"})
-        assert result is None
 
 
 class TestVideoPlanBuilderBuild:
@@ -265,7 +18,7 @@ class TestVideoPlanBuilderBuild:
     def test_build_single_shot_under_3s(self, tmp_path):
         """Should create single segment for shot under 3 seconds"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         # Create test startframe
         startframe_path = tmp_path / "shot001_v1.png"
@@ -318,7 +71,7 @@ class TestVideoPlanBuilderBuild:
     def test_build_single_shot_over_3s_segmented(self, tmp_path):
         """Should split shot over 3 seconds into multiple segments"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         startframe_path = tmp_path / "shot001_v1.png"
         startframe_path.write_text("fake image")
@@ -380,7 +133,7 @@ class TestVideoPlanBuilderBuild:
     def test_build_multiple_shots(self, tmp_path):
         """Should handle multiple shots correctly"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         # Create startframes
         sf1 = tmp_path / "shot001_v1.png"
@@ -425,7 +178,7 @@ class TestVideoPlanBuilderBuild:
     def test_build_with_missing_selection(self, tmp_path):
         """Should create placeholder for shot without selection"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         storyboard = Storyboard(
             project="Test",
@@ -451,7 +204,7 @@ class TestVideoPlanBuilderBuild:
     def test_build_with_missing_startframe(self, tmp_path):
         """Should create placeholder when startframe file doesn't exist"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         storyboard = Storyboard(
             project="Test",
@@ -487,7 +240,7 @@ class TestVideoPlanBuilderBuild:
     def test_build_with_wan_motion(self, tmp_path):
         """Should preserve wan_motion settings in segments"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         startframe_path = tmp_path / "shot001_v1.png"
         startframe_path.write_text("fake")
@@ -528,7 +281,7 @@ class TestVideoPlanBuilderBuild:
     def test_build_segmentation_math(self, tmp_path):
         """Should calculate correct number of segments"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         startframe = tmp_path / "sf.png"
         startframe.write_text("fake")
@@ -576,7 +329,7 @@ class TestVideoPlanBuilderPlaceholder:
     def test_placeholder_segment_basic(self):
         """Should create valid placeholder segment"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         shot = Shot(
             shot_id="001",
@@ -607,7 +360,7 @@ class TestVideoPlanBuilderPlaceholder:
     def test_placeholder_segment_long_shot(self):
         """Should handle segmentation for long shots in placeholder"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         shot = Shot(
             shot_id="001",
@@ -631,7 +384,7 @@ class TestGenerationPlanHelpers:
     def test_generation_plan_for_shot(self, tmp_path):
         """Should filter segments by shot_id"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         startframe = tmp_path / "sf.png"
         startframe.write_text("fake")
@@ -672,7 +425,7 @@ class TestGenerationPlanHelpers:
     def test_generation_plan_get(self, tmp_path):
         """Should retrieve segment by plan_id"""
         # Arrange
-        builder = VideoPlanBuilder(max_segment_seconds=3.0)
+        builder = VideoPlanBuilder()  # Uses defaults: 73 frames @ 24 fps ≈ 3.04s
 
         startframe = tmp_path / "sf.png"
         startframe.write_text("fake")

@@ -1,6 +1,6 @@
-# 🎬 Keyframe Generator
+# 🎬 Keyframes (Keyframe Generator)
 
-**Tab Name:** 🎬 Keyframe Generator
+**Tab Name:** 🎬 Keyframes
 **File:** `addons/keyframe_generator.py`
 **Lines:** 444 (after Sprint 2 refactoring, down from 919)
 **Services:** KeyframeGenerationService, KeyframeService

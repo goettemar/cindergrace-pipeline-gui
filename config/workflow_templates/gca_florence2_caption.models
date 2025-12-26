@@ -1,0 +1,13 @@
+# Florence-2 Image Captioning Models
+# Format: node_class_type|input_name|model_path|display_name
+
+# Florence-2 Model (auto-downloaded from HuggingFace)
+DownloadAndLoadFlorence2Model|model|microsoft/Florence-2-large-ft|Florence-2 Large FT
+
+# Alternative models (uncomment to enable):
+# DownloadAndLoadFlorence2Model|model|microsoft/Florence-2-base-ft|Florence-2 Base FT (smaller)
+# DownloadAndLoadFlorence2Model|model|microsoft/Florence-2-large|Florence-2 Large (pre-trained)
+
+# Required Custom Nodes:
+# - ComfyUI-Florence2 (https://github.com/kijai/ComfyUI-Florence2)
+# - ComfyUI-Custom-Scripts (for ShowText|pysssss node)

@@ -1,0 +1,15 @@
+# Kohya FLUX Dataset Configuration
+# Character: cindergrace_flux1
+
+[general]
+caption_extension = ".txt"
+
+[[datasets]]
+batch_size = 1
+resolution = [512, 512]
+enable_bucket = true
+bucket_no_upscale = true
+
+  [[datasets.subsets]]
+  image_dir = "/home/zorinadmin/comfyui/production/ComfyUI/output/character_training/cindergrace"
+  num_repeats = 10

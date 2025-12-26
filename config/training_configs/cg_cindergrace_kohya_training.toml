@@ -1,0 +1,51 @@
+# Kohya FLUX LoRA Training Configuration
+# Generated for: cg_cindergrace
+# Trigger word: cindergrace
+
+[model_arguments]
+pretrained_model_name_or_path = "/home/ubuntuadmin/comfyui/models/diffusion_models/flux1-dev-fp8.safetensors"
+ae = "/home/ubuntuadmin/comfyui/models/vae/ae.safetensors"
+clip_l = ""
+t5xxl = ""
+
+[additional_network_arguments]
+network_module = "networks.lora_flux"
+network_dim = 16
+network_alpha = 8
+
+[optimizer_arguments]
+optimizer_type = "prodigy"
+learning_rate = 1.0
+
+[training_arguments]
+output_dir = "/home/ubuntuadmin/comfyui/models/loras"
+output_name = "cg_cg_cindergrace"
+save_model_as = "safetensors"
+max_train_steps = 1500
+mixed_precision = "bf16"
+gradient_checkpointing = true
+gradient_accumulation_steps = 4
+seed = 42
+save_every_n_steps = 500
+cache_latents = true
+cache_latents_to_disk = true
+cache_text_encoder_outputs = true
+cache_text_encoder_outputs_to_disk = true
+
+[flux_specific_arguments]
+blocks_to_swap = 20
+t5xxl_max_token_length = 512
+guidance_scale = 1.0
+
+[dataset_arguments]
+resolution = 512
+enable_bucket = true
+bucket_no_upscale = true
+
+[[datasets]]
+batch_size = 1
+
+[[datasets.subsets]]
+image_dir = "/home/ubuntuadmin/comfyui/output/character_training/cindergrace"
+caption_extension = ".txt"
+num_repeats = 10

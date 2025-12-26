@@ -1,0 +1,4 @@
+# Modelle für gcv_wan_2.2_5b_i2v
+
+# Pfade relativ zu ComfyUI/models/
+diffusion_models/wan2.2_ti2v_5B_fp16.safetensors

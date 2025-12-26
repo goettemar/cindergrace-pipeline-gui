@@ -1,0 +1,59 @@
+# Kohya FLUX LoRA Training - 16GB VRAM Preset
+# Optimized for RTX 5060 Ti, RTX 4080, RTX 3080 Ti (16GB)
+# Uses Prodigy optimizer with aggressive memory savings
+
+[preset_info]
+name = "16GB VRAM"
+description = "Memory-optimized preset for 16GB GPUs"
+target_gpus = ["RTX 5060 Ti", "RTX 4080", "RTX 3080 Ti"]
+estimated_vram_peak = "14-15GB"
+
+[model_arguments]
+# Model paths are injected at runtime by KohyaTrainerService
+pretrained_model_name_or_path = "{model_path}"
+ae = "{vae_path}"
+clip_l = "{clip_l_path}"
+t5xxl = "{t5xxl_path}"
+
+[additional_network_arguments]
+network_module = "networks.lora_flux"
+network_dim = 16
+network_alpha = 8
+
+[optimizer_arguments]
+optimizer_type = "prodigy"
+learning_rate = 1.0
+# Prodigy auto-adjusts LR, so 1.0 is standard
+
+[training_arguments]
+output_dir = "{output_dir}"
+output_name = "cg_{character_name}"
+save_model_as = "safetensors"
+max_train_steps = 1500
+mixed_precision = "bf16"
+gradient_checkpointing = true
+gradient_accumulation_steps = 4
+seed = 42
+save_every_n_steps = 500
+cache_latents = true
+cache_latents_to_disk = true
+cache_text_encoder_outputs = true
+cache_text_encoder_outputs_to_disk = true
+
+[flux_specific_arguments]
+blocks_to_swap = 20
+t5xxl_max_token_length = 512
+guidance_scale = 1.0
+
+[dataset_arguments]
+resolution = 512
+enable_bucket = true
+bucket_no_upscale = true
+
+[[datasets]]
+batch_size = 1
+
+[[datasets.subsets]]
+image_dir = "{images_dir}"
+caption_extension = ".txt"
+num_repeats = 10

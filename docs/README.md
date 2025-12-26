@@ -1,7 +1,7 @@
 # CINDERGRACE GUI Documentation
 
-**Version:** v0.5.1
-**Last Updated:** December 13, 2025
+**Version:** v0.6.0
+**Last Updated:** December 16, 2025
 **Purpose:** Technical documentation for AI/LLM-assisted development
 
 ---
@@ -20,11 +20,17 @@ docs/
 ├── addons/
 │   ├── PROJECT.md              # 📁 Project Panel
 │   ├── STORYBOARD_EDITOR.md    # 📖 Storyboard Editor
+│   ├── IMAGE_IMPORTER.md       # 📥 Image Importer (NEW!)
 │   ├── KEYFRAME_GENERATOR.md   # 🎬 Keyframe Generator
 │   ├── KEYFRAME_SELECTOR.md    # ✅ Keyframe Selector
 │   ├── VIDEO_GENERATOR.md      # 🎥 Video Generator
+│   ├── FIRSTLAST_VIDEO.md      # 🎞️ First/Last Frame Video (NEW!)
+│   ├── CHARACTER_TRAINER.md    # 🎭 Character Trainer (NEW!)
 │   ├── TEST_COMFY.md           # 🧪 Test ComfyUI
+│   ├── SETUP_WIZARD.md         # 🧙 Setup-Assistent (NEW!)
 │   └── SETTINGS.md             # ⚙️ Settings Panel
+├── colab/
+│   └── GOOGLE_COLAB.md         # ☁️ Google Colab Integration (Beta)
 └── services/
     ├── KEYFRAME_SERVICE.md      # Keyframe generation business logic
     ├── VIDEO_SERVICE.md         # Video generation business logic
@@ -44,6 +50,11 @@ docs/
 | **Change storyboard editing** | `addons/STORYBOARD_EDITOR.md` |
 | **Fix project creation** | `addons/PROJECT.md` |
 | **Modify settings/config** | `addons/SETTINGS.md` |
+| **Modify image import** | `addons/IMAGE_IMPORTER.md` |
+| **Modify first/last frame video** | `addons/FIRSTLAST_VIDEO.md` |
+| **Modify character training** | `addons/CHARACTER_TRAINER.md` |
+| **Modify setup wizard** | `addons/SETUP_WIZARD.md` |
+| **Fix Google Colab** | `colab/GOOGLE_COLAB.md` + `BACKLOG.md` (#029) |
 | **Change ComfyUI workflow updates** | Addon using it + Architecture (ComfyAPI section below) |
 | **Add new validation rule** | This file (Domain Layer) + affected addon doc |
 | **Add new model/domain object** | This file (Domain Layer) |
@@ -53,6 +64,8 @@ docs/
 | **Fix test failures** | This file (Testing) + affected component doc |
 | **Plan new feature** | `ROADMAP.md` + `templates/CHANGE_TEMPLATE.md` |
 | **Fix known bug** | `BACKLOG.md` + affected component docs |
+| **Add character LoRA** | This file (Naming Conventions) + `services/character_lora_service.py` |
+| **Add CINDERGRACE workflow** | This file (Naming Conventions) + `config/workflow_templates/` |
 
 ---
 
@@ -126,6 +139,113 @@ CINDERGRACE GUI follows a **layered architecture** with clear separation of conc
 
 ---
 
+## 📛 Naming Conventions: `cg_` and `gc_` Prefixes
+
+CINDERGRACE uses specific prefixes to identify framework-specific files. This allows filtering and automatic discovery of relevant resources.
+
+### `cg_` Prefix - Character LoRAs
+
+**Pattern:** `cg_<character_name>.safetensors`
+
+**Location:** `<ComfyUI>/models/loras/`
+
+**Purpose:** Identifies character LoRA files trained for the CINDERGRACE framework.
+
+**Important:** The `cg_` prefix is **only for the filename**, not the trigger word!
+
+| File Name | Trigger Word (in Prompt) | Display Name |
+|-----------|-------------------------|--------------|
+| `cg_cindergrace.safetensors` | `cindergrace` | Cindergrace |
+| `cg_elena.safetensors` | `elena` | Elena |
+| `cg_marco_knight.safetensors` | `marco_knight` | Marco Knight |
+
+**Example Usage in Storyboard:**
+```json
+{
+  "shot_id": "001",
+  "prompt": "cindergrace, beautiful portrait, soft lighting",
+  "character_lora": "cg_cindergrace"
+}
+```
+
+- `character_lora`: References the **file ID** (with `cg_` prefix)
+- `prompt`: Uses the **trigger word** (without `cg_` prefix)
+
+**Code Reference:** `services/character_lora_service.py`
+
+### `gc*_` Prefix - CINDERGRACE Workflows
+
+**Pattern:** `gc<type>_<workflow_name>.json`
+
+**Location:** `config/workflow_templates/`
+
+**Purpose:** Identifies ComfyUI workflow templates optimized for CINDERGRACE. The second letter indicates the workflow category.
+
+#### Workflow Type Prefixes
+
+| Prefix | Category | Description | Example |
+|--------|----------|-------------|---------|
+| `gcp_` | **P**icture | Keyframe/Image Generation (Flux) | `gcp_flux1_krea_dev_xxx.json` |
+| `gcv_` | **V**ideo | Video Generation (Wan, LTX) | `gcv_wan_2.2_14b_i2v.json` |
+| `gcl_` | **L**oRA/Training | Dataset Generation, Training | `gcl_qwen_image_edit_2509.json` |
+| `gca_` | **A**nalysis | Image Captioning, Vision AI | `gca_florence2_caption.json` |
+| `gcs_` | **S**ound | Audio/Lipsync (Wan s2v) | `gcs_wan_2.2_14b_s2v.json` |
+
+#### Workflow Modifiers (Suffixes)
+
+| Suffix | Purpose | Example |
+|--------|---------|---------|
+| `_lora` | LoRA-enabled variant | `gcp_flux1_krea_dev_lora.json` |
+| `_sage` | SageAttention optimized | `gcv_wan_2.2_14B_i2v_gguf_sage.json` |
+| `_gguf` | GGUF quantized model | `gcv_wan_2.2_14B_i2v_gguf.json` |
+| `_fp8` | FP8 precision (16GB VRAM) | `gcp_flux1_krea_dev_fp8.json` |
+
+#### Examples by Category
+
+**Picture Generation (`gcp_`):**
+| Workflow | Description |
+|----------|-------------|
+| `gcp_flux1_krea_dev_xxx.json` | Flux keyframe generation |
+| `gcp_sdxl_lora.json` | SDXL with LoRA support |
+
+**Video Generation (`gcv_`):**
+| Workflow | Description |
+|----------|-------------|
+| `gcv_wan_2.2_14b_i2v.json` | Wan 2.2 14B image-to-video |
+| `gcv_wan_2.2_5b_i2v.json` | Wan 2.2 5B (lower VRAM) |
+| `gcv_ltvx_i2v.json` | LTX-Video (6-8GB VRAM) |
+| `gcv_wan_2.2_14B_i2v_gguf_sage.json` | GGUF + SageAttention |
+
+**LoRA/Training (`gcl_`):**
+| Workflow | Description |
+|----------|-------------|
+| `gcl_qwen_image_edit_2509.json` | Qwen Image Edit for datasets |
+| `gcl_wan2.2_14B_s2v.json` | Wan sound-to-video (training) |
+
+**Analysis (`gca_`):**
+| Workflow | Description |
+|----------|-------------|
+| `gca_florence2_caption.json` | Florence-2 image captioning |
+
+**Automatic Workflow Selection:**
+The `KeyframeGenerationService` automatically selects the `_lora` variant when a shot has `character_lora` set.
+
+**Code Reference:** `services/keyframe_service.py` → `get_workflow_for_shot()`
+
+### All Prefixes Overview
+
+| Prefix | Purpose | Example |
+|--------|---------|---------|
+| `cg_` | Character LoRAs | `cg_elena.safetensors` |
+| `gcp_` | Picture/Keyframe Workflows | `gcp_flux1_krea_dev_xxx.json` |
+| `gcv_` | Video Workflows | `gcv_wan_2.2_14b_i2v.json` |
+| `gcl_` | LoRA/Training Workflows | `gcl_qwen_image_edit_2509.json` |
+| `gca_` | Analysis Workflows | `gca_florence2_caption.json` |
+| `gcs_` | Sound/Lipsync Workflows | `gcs_wan_2.2_14b_s2v.json` |
+| `sb_` | Storyboard Templates (future) | `sb_music_video.json` |
+
+---
+
 ## 📊 Overall Pipeline Workflow
 
 The pipeline transforms a storyboard into finished video clips through 5 phases:
@@ -176,30 +296,56 @@ graph LR
 **Artifacts Created:**
 - `<project>/storyboards/<name>.json`
 
-**Storyboard Format:**
+**Storyboard Format (v2.0):**
 ```json
 {
   "project": "Project Name",
+  "version": "2.0",
   "shots": [
     {
       "shot_id": "001",
       "filename_base": "cathedral-interior",
       "description": "Opening shot",
-      "prompt": "gothic cathedral interior, cinematic lighting",
+      "prompt": "gothic cathedral interior",
       "negative_prompt": "blurry, low quality",
       "width": 1024,
       "height": 576,
       "duration": 4.0,
-      "camera_movement": "slow_push",
-      "wan_motion": {
-        "type": "macro_dolly",
-        "strength": 0.6,
-        "notes": "Small forward movement"
+      "presets": {
+        "style": "cinematic",
+        "lighting": "golden_hour",
+        "mood": "epic",
+        "time_of_day": "sunrise",
+        "composition": "wide_shot",
+        "color_grade": "warm",
+        "camera": "dolly_in",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 7.0,
+        "steps": 20,
+        "motion_strength": 0.4
       }
     }
   ]
 }
 ```
+
+**Preset Categories (8):**
+- `style`: cinematic, photorealistic, anime, etc.
+- `lighting`: golden_hour, volumetric, dramatic, etc.
+- `mood`: epic, mysterious, peaceful, etc.
+- `time_of_day`: sunrise, sunset, night, etc.
+- `composition`: wide_shot, close_up, rule_of_thirds, etc.
+- `color_grade`: warm, teal_orange, desaturated, etc.
+- `camera`: dolly_in, tracking, static, etc.
+- `motion`: subtle, flowing, dynamic, etc.
 
 **See:** `addons/STORYBOARD_EDITOR.md`
 
@@ -349,11 +495,13 @@ Uses node updaters (Strategy Pattern) to modify workflow JSON:
 
 ---
 
-### ProjectStore
+### ProjectStore (SQLite)
 
 **Location:** `infrastructure/project_store.py`
 
-**Purpose:** Manage project metadata and file paths
+**Purpose:** Manage project metadata and file paths using SQLite database
+
+**Database:** `data/projects.db`
 
 **Key Methods:**
 ```python
@@ -364,22 +512,62 @@ class ProjectStore:
     def list_projects(self) -> List[dict]
     def project_path(self, project: dict, subdir: str = None) -> str
     def ensure_dir(self, project: dict, subdir: str) -> str
+    def update_project(self, slug: str, **fields) -> dict
+    def delete_project(self, slug: str) -> bool
 ```
 
-**Project Metadata (`project.json`):**
-```json
-{
-  "name": "My Project",
-  "slug": "my-project",
-  "created_at": "2025-12-13T10:00:00",
-  "path": "/path/to/ComfyUI/output/my-project",
-  "storyboard": "storyboard_v1.json",
-  "description": "Optional description"
-}
+**SQLite Schema:**
+```sql
+CREATE TABLE projects (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT UNIQUE NOT NULL,
+    path TEXT NOT NULL,
+    storyboard TEXT,
+    description TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
 ```
 
 **Active Project Storage:**
 Stored in `config/settings.json` under key `active_project_slug`
+
+---
+
+### PresetService (SQLite)
+
+**Location:** `infrastructure/preset_service.py`
+
+**Purpose:** Manage prompt presets for storyboard shots
+
+**Database:** `data/presets.db`
+
+**Key Methods:**
+```python
+class PresetService:
+    def get_presets_by_category(self, category: str) -> List[dict]
+    def get_preset(self, category: str, key: str) -> Optional[dict]
+    def expand_presets(self, preset_keys: dict) -> str  # Returns combined prompt text
+    def list_categories(self) -> List[str]
+```
+
+**SQLite Schema:**
+```sql
+CREATE TABLE presets (
+    id INTEGER PRIMARY KEY,
+    category TEXT NOT NULL,
+    key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    prompt_text TEXT NOT NULL,
+    UNIQUE(category, key)
+);
+```
+
+**Auto-Seeding:**
+- Database is automatically seeded with 64 presets on first run
+- 8 categories × 8 presets each
+- See `infrastructure/preset_service.py` for preset definitions
 
 ---
 
@@ -651,7 +839,7 @@ pytest --cov=. --cov-report=html
 pytest tests/unit/services/keyframe/test_keyframe_service.py
 ```
 
-### Current Coverage: **75%** ✅
+### Current Coverage: **52%** (417 tests passing)
 
 **High Coverage (>90%):**
 - All services (Keyframe, Video, Selection)
@@ -820,10 +1008,15 @@ pytest tests/unit/services/keyframe/test_keyframe_service.py
 ```
 cindergrace_gui/
 ├── main.py                          # Application entry point
-├── addons/                          # UI layer (7 addons)
+├── data/                            # SQLite databases
+│   ├── projects.db                  # Project metadata (SQLite)
+│   ├── presets.db                   # Prompt presets (SQLite)
+│   └── templates/
+│       └── storyboard_beispiel.json # Example storyboard v2.0
+├── addons/                          # UI layer (8 addons)
 │   ├── base_addon.py
 │   ├── project_panel.py
-│   ├── storyboard_editor.py
+│   ├── storyboard_editor.py         # NEW: 3-tab storyboard editor
 │   ├── keyframe_generator.py
 │   ├── keyframe_selector.py
 │   ├── video_generator.py
@@ -842,7 +1035,8 @@ cindergrace_gui/
 │       └── last_frame_extractor.py
 ├── infrastructure/                  # Core services layer
 │   ├── config_manager.py
-│   ├── project_store.py
+│   ├── project_store.py             # SQLite backend
+│   ├── preset_service.py            # NEW: Preset management (SQLite)
 │   ├── workflow_registry.py
 │   ├── state_store.py
 │   ├── logger.py
@@ -1027,6 +1221,6 @@ For architectural decisions or questions, refer to the component-specific docume
 
 ---
 
-**Last Updated:** December 13, 2025
+**Last Updated:** December 16, 2025
 **Maintained By:** Architecture Team
-**Version:** v0.5.1
+**Version:** v0.6.0

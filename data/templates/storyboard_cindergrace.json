@@ -1,0 +1,165 @@
+{
+  "project": "Cindergrace Character Demo",
+  "description": "Storyboard mit Character LoRA Integration - zeigt Cindergrace in verschiedenen Szenen.",
+  "version": "2.2",
+  "shots": [
+    {
+      "shot_id": "001",
+      "filename_base": "cindergrace-portrait",
+      "description": "Portrait von Cindergrace im Studio",
+      "prompt": "cindergrace, beautiful portrait, soft studio lighting, looking at camera, detailed face, professional photography",
+      "negative_prompt": "blurry, low quality, distorted, deformed",
+      "character_lora": "cg_cindergrace",
+      "presets": {
+        "style": "photorealistic",
+        "lighting": "studio",
+        "mood": "romantic",
+        "composition": "close_up",
+        "color_grade": "warm"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 3.5,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 6.0,
+        "steps": 20,
+        "motion_strength": 0.3
+      },
+      "width": 1024,
+      "height": 576,
+      "duration": 3.0
+    },
+    {
+      "shot_id": "002",
+      "filename_base": "cindergrace-outdoor",
+      "description": "Cindergrace in einer Waldlandschaft",
+      "prompt": "cindergrace, standing in mystical forest, morning fog, sunbeams through trees, fantasy atmosphere, detailed face",
+      "negative_prompt": "blurry, low quality, distorted, deformed",
+      "character_lora": "cg_cindergrace",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "volumetric",
+        "mood": "mysterious",
+        "time_of_day": "morning",
+        "composition": "rule_of_thirds",
+        "color_grade": "desaturated",
+        "camera": "tracking",
+        "motion": "subtle"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 3.5,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 6.0,
+        "steps": 20,
+        "motion_strength": 0.4
+      },
+      "width": 1024,
+      "height": 576,
+      "duration": 3.0
+    },
+    {
+      "shot_id": "003",
+      "filename_base": "cindergrace-closeup",
+      "description": "Nahaufnahme von Cindergrace mit dramatischer Beleuchtung",
+      "prompt": "cindergrace, extreme close-up face, dramatic side lighting, cinematic, detailed eyes, emotional expression",
+      "negative_prompt": "blurry, low quality, distorted, deformed",
+      "character_lora": "cg_cindergrace",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "dramatic",
+        "mood": "tense",
+        "composition": "close_up",
+        "color_grade": "bleach_bypass"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 3.5,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 6.0,
+        "steps": 20,
+        "motion_strength": 0.2
+      },
+      "width": 1024,
+      "height": 576,
+      "duration": 2.5
+    },
+    {
+      "shot_id": "004",
+      "filename_base": "landscape-transition",
+      "description": "Landschaftsaufnahme ohne Character (Transition)",
+      "prompt": "epic mountain landscape at golden hour, dramatic clouds, cinematic wide shot",
+      "negative_prompt": "blurry, low quality",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "golden_hour",
+        "mood": "epic",
+        "time_of_day": "sunset",
+        "composition": "wide_shot",
+        "color_grade": "teal_orange",
+        "camera": "dolly_in",
+        "motion": "flowing"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 3.5,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 6.0,
+        "steps": 20,
+        "motion_strength": 0.5
+      },
+      "width": 1024,
+      "height": 576,
+      "duration": 3.0
+    },
+    {
+      "shot_id": "005",
+      "filename_base": "cindergrace-finale",
+      "description": "Abschluss-Shot: Cindergrace vor Sonnenuntergang",
+      "prompt": "cindergrace, silhouette against sunset sky, dramatic orange and purple colors, epic cinematic shot, wind in hair",
+      "negative_prompt": "blurry, low quality, distorted, deformed",
+      "character_lora": "cg_cindergrace",
+      "presets": {
+        "style": "cinematic",
+        "lighting": "backlit",
+        "mood": "epic",
+        "time_of_day": "sunset",
+        "composition": "centered",
+        "color_grade": "warm",
+        "camera": "crane_up",
+        "motion": "dynamic"
+      },
+      "flux": {
+        "seed": -1,
+        "cfg": 3.5,
+        "steps": 20
+      },
+      "wan": {
+        "seed": -1,
+        "cfg": 6.0,
+        "steps": 20,
+        "motion_strength": 0.4
+      },
+      "width": 1024,
+      "height": 576,
+      "duration": 4.0
+    }
+  ],
+  "video_settings": {
+    "default_fps": 24,
+    "default_workflow": "Wan 2.2 long txt 2 vid.json",
+    "max_duration": 3.0
+  }
+}

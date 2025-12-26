@@ -1,6 +1,7 @@
 """Pydantic validation models for CINDERGRACE input validation"""
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from typing import Optional
+from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
+from typing import Any, Dict, List, Optional, Tuple
+import json
 import os
 import re
 
@@ -238,6 +239,187 @@ class SelectionFileInput(BaseModel):
         return v
 
 
+# ========================================
+# Storyboard Draft Validation
+# ========================================
+
+class ShotDraft(BaseModel):
+    """Validation model for a single shot in a storyboard draft."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="allow")
+
+    shot_id: str = Field(min_length=1, description="Shot identifier")
+    filename_base: str = Field(min_length=1, description="Base filename")
+    prompt: str = Field(min_length=1, description="Image generation prompt")
+    description: Optional[str] = Field(default=None, description="Shot description")
+    negative_prompt: Optional[str] = Field(default=None)
+    width: int = Field(default=1024, ge=256, le=2048)
+    height: int = Field(default=576, ge=256, le=2048)
+    duration: float = Field(default=3.0, gt=0, le=30)
+    presets: Optional[Dict[str, str]] = Field(default=None)
+
+    @field_validator('filename_base')
+    @classmethod
+    def validate_filename_base(cls, v: str) -> str:
+        v = v.strip()
+        # Remove invalid filesystem characters
+        invalid_chars = r'[<>:"/\\|?*\s]'
+        if re.search(invalid_chars, v):
+            # Auto-fix: replace with hyphens
+            v = re.sub(invalid_chars, '-', v)
+        # Ensure lowercase
+        return v.lower()
+
+    @field_validator('shot_id')
+    @classmethod
+    def validate_shot_id(cls, v: str) -> str:
+        v = v.strip()
+        # Ensure it's a valid ID format (numbers or alphanumeric)
+        if not re.match(r'^[\w\-]+$', v):
+            raise ValueError(f"Invalid shot_id format: {v}")
+        return v
+
+
+class StoryboardDraft(BaseModel):
+    """Validation model for LLM-generated storyboard drafts."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="allow")
+
+    project: str = Field(min_length=1, description="Project name")
+    shots: List[ShotDraft] = Field(min_length=1, description="List of shots")
+    description: Optional[str] = Field(default=None)
+    version: str = Field(default="2.2")
+    video_settings: Optional[Dict[str, Any]] = Field(default=None)
+
+    @field_validator('project')
+    @classmethod
+    def validate_project(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Project name cannot be empty")
+        return v
+
+    @field_validator('shots')
+    @classmethod
+    def validate_shots(cls, v: List[ShotDraft]) -> List[ShotDraft]:
+        if not v:
+            raise ValueError("Storyboard must have at least one shot")
+        return v
+
+    @model_validator(mode='after')
+    def validate_unique_shot_ids(self) -> 'StoryboardDraft':
+        """Ensure all shot IDs are unique."""
+        shot_ids = [shot.shot_id for shot in self.shots]
+        if len(shot_ids) != len(set(shot_ids)):
+            raise ValueError("Duplicate shot_id found - all shot IDs must be unique")
+        return self
+
+
+class StoryboardDraftValidator:
+    """Utility class for validating storyboard drafts from LLM output."""
+
+    @staticmethod
+    def validate_json_string(json_str: str) -> Tuple[bool, Optional[StoryboardDraft], List[str]]:
+        """Validate a JSON string as a storyboard draft.
+
+        Args:
+            json_str: JSON string to validate
+
+        Returns:
+            Tuple of (is_valid, parsed_draft, list_of_errors)
+        """
+        errors = []
+
+        # Step 1: Parse JSON
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            return False, None, [f"Invalid JSON: {e}"]
+
+        # Step 2: Check it's a dict
+        if not isinstance(data, dict):
+            return False, None, ["Root element must be an object, not array"]
+
+        # Step 3: Validate with Pydantic
+        try:
+            draft = StoryboardDraft.model_validate(data)
+            return True, draft, []
+        except Exception as e:
+            # Extract validation errors
+            error_str = str(e)
+            # Parse pydantic validation errors
+            if hasattr(e, 'errors'):
+                for err in e.errors():
+                    loc = " -> ".join(str(l) for l in err.get('loc', []))
+                    msg = err.get('msg', 'Unknown error')
+                    errors.append(f"{loc}: {msg}")
+            else:
+                errors.append(error_str)
+
+            return False, None, errors
+
+    @staticmethod
+    def validate_dict(data: Dict[str, Any]) -> Tuple[bool, Optional[StoryboardDraft], List[str]]:
+        """Validate a dictionary as a storyboard draft.
+
+        Args:
+            data: Dictionary to validate
+
+        Returns:
+            Tuple of (is_valid, parsed_draft, list_of_errors)
+        """
+        try:
+            draft = StoryboardDraft.model_validate(data)
+            return True, draft, []
+        except Exception as e:
+            errors = []
+            if hasattr(e, 'errors'):
+                for err in e.errors():
+                    loc = " -> ".join(str(l) for l in err.get('loc', []))
+                    msg = err.get('msg', 'Unknown error')
+                    errors.append(f"{loc}: {msg}")
+            else:
+                errors.append(str(e))
+            return False, None, errors
+
+    @staticmethod
+    def get_warnings(draft: StoryboardDraft) -> List[str]:
+        """Get non-critical warnings for a valid draft.
+
+        Args:
+            draft: Validated storyboard draft
+
+        Returns:
+            List of warning messages
+        """
+        warnings = []
+
+        for i, shot in enumerate(draft.shots):
+            # Check prompt length
+            if len(shot.prompt) < 20:
+                warnings.append(f"Shot {shot.shot_id}: Prompt is very short ({len(shot.prompt)} chars)")
+
+            # Check for missing description
+            if not shot.description:
+                warnings.append(f"Shot {shot.shot_id}: Missing description")
+
+            # Check unusual resolutions
+            aspect_ratio = shot.width / shot.height
+            if aspect_ratio < 0.5 or aspect_ratio > 2.5:
+                warnings.append(f"Shot {shot.shot_id}: Unusual aspect ratio ({aspect_ratio:.2f})")
+
+            # Check very long durations
+            if shot.duration > 10:
+                warnings.append(f"Shot {shot.shot_id}: Long duration ({shot.duration}s) may require many segments")
+
+        # Check total duration
+        total_duration = sum(s.duration for s in draft.shots)
+        if total_duration > 120:
+            warnings.append(f"Total duration is {total_duration:.1f}s - this will generate many video segments")
+
+        return warnings
+
+
 __all__ = [
     "KeyframeGeneratorInput",
     "VideoGeneratorInput",
@@ -246,4 +428,8 @@ __all__ = [
     "StoryboardFileInput",
     "WorkflowFileInput",
     "SelectionFileInput",
+    # Storyboard Draft
+    "ShotDraft",
+    "StoryboardDraft",
+    "StoryboardDraftValidator",
 ]

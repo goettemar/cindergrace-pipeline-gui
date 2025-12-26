@@ -1,0 +1,14 @@
+# Qwen Image Edit 2509 - Character Dataset Generation
+# Custom Nodes required: ComfyUI_Qwen2-VL, CFGNorm
+
+# Main Model (FP8 - requires ~8GB VRAM)
+diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors
+
+# CLIP Vision Encoder
+clip/qwen_2.5_vl_7b_fp8_scaled.safetensors
+
+# VAE
+vae/qwen_image_vae.safetensors
+
+# Download Links:
+# https://huggingface.co/Comfy-Org/Qwen_Image_Edit_2509_comfy

@@ -1,7 +1,7 @@
-# Model Manager - ComfyUI Model Organization Tool
+# 🗂️ Models (Model Manager)
 
 **Category:** Tools
-**Tab Location:** 🔧 Tools → 🗂️ Model Manager
+**Tab Name:** 🗂️ Models
 **Status:** Phase 2 Complete
 
 ## Overview

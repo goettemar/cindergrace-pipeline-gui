@@ -24,7 +24,8 @@ class WorkflowScanner:
         "UpscaleModelLoader": "upscale_models",
         "CLIPLoader": "clip",
         "DualCLIPLoader": "clip",
-        "UNETLoader": "unet",
+        "UNETLoader": "diffusion_models",  # Most UNETs are in diffusion_models/
+        "UnetLoaderGGUF": "diffusion_models",  # GGUF quantized models
         "StyleModelLoader": "style_models",
     }
 

@@ -57,6 +57,8 @@ coverage.xml
 output/
 !output/.gitkeep
 config/settings.json
+config/settings.json.backup
+data/cindergrace.db
 
 # Temporary files
 *.tmp
@@ -74,6 +76,9 @@ Thumbs.db
 .env.local
 credentials.json
 secrets.json
+hf_token.txt
+**/hf_token*
+.huggingface/
 
 # Desktop entries
 *.desktop

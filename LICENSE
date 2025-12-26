@@ -1,0 +1,137 @@
+CINDERGRACE Pipeline - Terms of Use and License Agreement
+=========================================================
+
+Copyright (c) 2024-2025. All Rights Reserved.
+
+
+1. DISCLAIMER OF WARRANTY
+-------------------------
+
+THIS SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+IN NO EVENT SHALL THE AUTHORS, COPYRIGHT HOLDERS, OR CONTRIBUTORS BE LIABLE
+FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+This includes but is not limited to:
+- No warranty of error-free or uninterrupted operation
+- No warranty regarding the quality of generated content
+- No warranty that the software will meet your requirements
+- No warranty regarding compatibility with any system or software
+
+
+2. LICENSE - PRIVATE USE ONLY
+-----------------------------
+
+This software is licensed exclusively for PRIVATE, NON-COMMERCIAL USE.
+
+NOT PERMITTED:
+- Commercial use of any kind
+- Resale, rental, or sublicensing
+- Distribution to third parties
+- Publication or sharing of source code
+- Creation of derivative works
+- Reverse engineering, decompilation, or disassembly
+- Use in any commercial product or service
+- Use to generate content for commercial purposes
+
+PERMITTED:
+- Private use on your own systems
+- Creation of content for strictly private, non-commercial purposes
+
+
+3. RESPONSIBILITY FOR AI-GENERATED CONTENT
+-------------------------------------------
+
+You bear SOLE RESPONSIBILITY for all content created with this software.
+
+By using this software, you agree to:
+- Not create deepfakes, lipsync videos, or any synthetic media of individuals
+  without their explicit written consent
+- Not create content that defames, harasses, threatens, or deceives individuals
+- Not use generated content for disinformation, fraud, impersonation, or any
+  illegal purposes
+- Clearly label and disclose AI-generated content as synthetic/artificial when
+  shared or published
+- Comply with all applicable local, national, and international laws regarding
+  AI-generated content, synthetic media, and digital rights
+- Not use this software to violate any person's privacy, dignity, or rights
+
+
+4. THIRD-PARTY MODELS AND DEPENDENCIES
+--------------------------------------
+
+This software utilizes AI models and components from third parties, including
+but not limited to:
+- Wan 2.2 (Alibaba)
+- Flux (Black Forest Labs)
+- LTX-Video (Lightricks)
+- SDXL (Stability AI)
+- ComfyUI (comfyanonymous)
+
+Users are required to comply with the respective license terms and conditions
+of these third-party components. The developers of CINDERGRACE assume no
+responsibility for:
+- License violations by users regarding third-party models
+- The behavior, output quality, or reliability of third-party models
+- Any damages arising from the use of third-party components
+
+
+5. ALPHA/BETA STATUS
+--------------------
+
+This software is provided in ALPHA/BETA stage. By using this software, you
+explicitly acknowledge and accept that:
+- The software may contain bugs, errors, or defects
+- Crashes and data loss may occur without warning
+- Features may be changed, modified, or removed without notice
+- Development may be discontinued at any time without notice
+- There is no guarantee of updates, patches, or bug fixes
+- There is no entitlement to technical support
+- The software is not intended for production or critical use
+
+
+6. INDEMNIFICATION
+------------------
+
+You agree to indemnify, defend, and hold harmless the developers, contributors,
+and rights holders from and against any and all claims, damages, losses, costs,
+and expenses (including reasonable legal fees) arising from or related to:
+- Your use or misuse of the software
+- Content you create, distribute, or publish using the software
+- Your violation of these terms and conditions
+- Your violation of any third-party rights
+- Any claims by third parties related to your use of the software
+
+
+7. GOVERNING LAW
+----------------
+
+These terms shall be governed by and construed in accordance with applicable
+laws. Any disputes arising from these terms or the use of the software shall
+be subject to the exclusive jurisdiction of the competent courts.
+
+
+8. SEVERABILITY
+---------------
+
+If any provision of these terms is found to be unenforceable or invalid, that
+provision shall be limited or eliminated to the minimum extent necessary so
+that these terms shall otherwise remain in full force and effect.
+
+
+9. ENTIRE AGREEMENT
+-------------------
+
+These terms constitute the entire agreement between you and the developers
+regarding the use of this software and supersede all prior agreements and
+understandings.
+
+
+BY DOWNLOADING, INSTALLING, OR USING THIS SOFTWARE, YOU ACKNOWLEDGE THAT YOU
+HAVE READ, UNDERSTOOD, AND AGREE TO BE BOUND BY THESE TERMS AND CONDITIONS.
+
+IF YOU DO NOT AGREE TO THESE TERMS, DO NOT USE THIS SOFTWARE.

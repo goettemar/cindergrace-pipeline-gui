@@ -3,7 +3,7 @@ import copy
 import os
 import random
 import re
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, TYPE_CHECKING
 
 from domain.models import Storyboard, SelectionSet, PlanSegment, GenerationPlan
 from infrastructure.model_validator import ModelValidator
@@ -14,6 +14,7 @@ from infrastructure.logger import get_logger
 from services.video.video_plan_builder import VideoPlanBuilder
 from services.video.file_operations import VideoFileHandler
 from services.video.last_frame_extractor import LastFrameExtractor
+from services.cleanup_service import CleanupService
 
 logger = get_logger(__name__)
 
@@ -38,6 +39,7 @@ class VideoGenerationService:
         self.state_store = state_store
         self.plan_builder = plan_builder or VideoPlanBuilder()
         self._file_handler = VideoFileHandler(project_store)
+        self._cleanup_service = CleanupService(project_store)
 
     def run_generation(
         self,
@@ -46,6 +48,7 @@ class VideoGenerationService:
         fps: int,
         project: Dict[str, Any],
         comfy_api: ComfyUIAPI,
+        resolution: Optional[Tuple[int, int]] = None,
     ) -> Tuple[List[Dict[str, Any]], List[str], Optional[str]]:
         """Execute ComfyUI workflow for all ready plan entries.
 
@@ -56,9 +59,9 @@ class VideoGenerationService:
         last_video_path: Optional[str] = None
 
         # Cleanup old video and image files before starting generation
-        cleanup_count = self._file_handler.cleanup_old_video_files()
+        cleanup_count = self._cleanup_service.cleanup_before_video_generation(project)
         if cleanup_count > 0:
-            logs.append(f"🧹 {cleanup_count} alte Datei(en) in temp-Ordner verschoben")
+            logs.append(f"🧹 {cleanup_count} alte Datei(en) archiviert")
 
         extractor = LastFrameExtractor()
 
@@ -88,6 +91,7 @@ class VideoGenerationService:
                     project=project,
                     comfy_api=comfy_api,
                     extractor=extractor,
+                    resolution=resolution,
                 )
 
                 if isinstance(job_result, tuple):
@@ -159,18 +163,26 @@ class VideoGenerationService:
         project: Dict[str, Any],
         comfy_api: ComfyUIAPI,
         extractor: Optional[LastFrameExtractor] = None,
+        resolution: Optional[Tuple[int, int]] = None,
     ) -> Tuple[List[str], Optional[str]]:
         """Execute a single video generation job."""
         workflow = copy.deepcopy(workflow_template)
         duration = entry.get("duration") or entry.get("effective_duration") or 3.0
         frames = max(1, int(round(duration * fps)))
 
+        # Use resolution from parameter (project config) or fallback to entry
+        if resolution:
+            width, height = resolution
+        else:
+            width = int(entry.get("width", 1024))
+            height = int(entry.get("height", 576))
+
         updated_workflow = self._apply_video_params(
             comfy_api=comfy_api,
             workflow=workflow,
             prompt=entry.get("prompt", ""),
-            width=int(entry.get("width", 1024)),
-            height=int(entry.get("height", 576)),
+            width=width,
+            height=height,
             filename_prefix=entry.get("clip_name", entry.get("shot_id", "clip")),
             start_frame_path=entry.get("start_frame"),
             fps=fps,

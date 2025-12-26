@@ -1,6 +1,6 @@
 # CINDERGRACE Development Backlog - Deferred Issues
 
-**Last Updated:** December 13, 2025
+**Last Updated:** December 21, 2025
 **Purpose:** Track issues, technical debt, and improvements that are deferred to future versions
 **Related:** See [ROADMAP.md](ROADMAP.md) for planned features
 
@@ -10,14 +10,16 @@
 
 | Category | Count | Priority Distribution |
 |----------|-------|-----------------------|
-| Known Issues | 6 | High: 2, Medium: 2, Low: 2 |
+| Known Issues | 7 | High: 2, Medium: 3, Low: 2 |
 | Code Quality | 4 | Medium: 4 |
 | Technical Debt - Architecture | 4 | Medium: 3, Low: 1 |
 | Technical Debt - Infrastructure | 4 | Low: 4 |
 | Technical Debt - Documentation | 4 | Medium: 2, Low: 2 |
 | CI/CD Incomplete | 3 | Medium: 3 |
-| Refactoring Carryover | 2 | Low: 2 |
-| **Total** | **27** | **High: 2, Medium: 11, Low: 14** |
+| Refactoring Carryover | 3 | Low: 3 |
+| Google Colab | 1 | Medium: 1 |
+| Workflow Templates | 1 | Medium: 1 |
+| **Total** | **31** | **High: 2, Medium: 14, Low: 15** |
 
 ---
 
@@ -903,6 +905,39 @@
 
 ---
 
+### #028: Keyframe Selector - Gallery Caption Position
+**Status:** Open
+**Priority:** Low
+**Impact:** User Experience
+**Assigned Version:** v0.7.0
+
+**Description:**
+- Gallery captions (v1, v2, v3...) are displayed at bottom-right of images
+- User requested captions at top of images for better visibility
+- Custom CSS attempts did not work with Gradio's internal structure
+
+**Current Status:**
+- Captions work and show variant labels (e.g., "Var 2 – sonnenaufgang-berge_v2_00001_.png")
+- Position is controlled by Gradio/Svelte internals
+- CSS selector `caption.caption.svelte-*` identified but positioning failed
+
+**Proposed Solution:**
+- Option A: Deep-dive into Gradio Gallery HTML structure and find working CSS
+- Option B: Use JavaScript injection to reposition caption elements
+- Option C: Overlay text directly on images before displaying (PIL/Pillow)
+- Option D: Wait for Gradio update with caption position option
+
+**Technical Notes:**
+- Gallery uses `<caption class="caption svelte-7anmrz">` element
+- Element is absolutely positioned by Svelte styles
+- May need `!important` overrides or parent element manipulation
+
+**Related Files:**
+- `addons/keyframe_selector.py` (Gallery component, line ~179)
+- CSS injection in `gr.Blocks(css=...)` parameter
+
+---
+
 ## 📊 Priority Summary
 
 ### Immediate Action Required (High Priority)
@@ -942,6 +977,7 @@
 - #023: Codecov Integration
 - #024: Pre-commit Hooks
 - #025: Branch Protection
+- #028: Gallery Caption Position (Keyframe Selector)
 
 **v0.8.0:**
 - #003: Live Progress Updates
@@ -951,6 +987,7 @@
 - #011: UI/Business Logic Separation
 - #014: Caching Layer
 - #027: ComfyAPI Strategy Refinement
+- #029: Google Colab Integration
 
 **v0.9.0:**
 - #005: Windows File Locking
@@ -958,6 +995,7 @@
 - #019: API Documentation
 - #020: Architecture Diagrams
 - #026: SegmentManager Extraction
+- #030: User Workflow Templates Setup & Documentation
 
 **v1.0.0:**
 - #015: Health Check Endpoint
@@ -966,6 +1004,130 @@
 - #018: Container Support
 - #021: Migration Guides
 - #022: Troubleshooting Flowcharts
+
+---
+
+## ☁️ Google Colab Integration
+
+### #029: Google Colab Integration nicht funktional
+**Status:** Open
+**Priority:** Medium
+**Impact:** Cloud Users
+**Assigned Version:** v0.8.0
+
+**Description:**
+Die Google Colab Integration befindet sich in der Beta-Phase und ist derzeit nicht vollständig funktionsfähig. Die Notebooks im `colab/` Ordner erlauben zwar das Setup von ComfyUI in der Cloud, aber mehrere kritische Funktionen fehlen oder sind instabil.
+
+**Bekannte Einschränkungen:**
+- Wan 2.2 Modell-URLs nicht hinterlegt (Download-Zellen unvollständig)
+- Cloudflare Tunnel kann instabil sein
+- Session-Timeout bei Google Colab Free Tier
+- FluxTrainer Fork-URL möglicherweise veraltet
+- Keine automatische Wiederverbindung bei Session-Abbruch
+
+**Betroffene Dateien:**
+- `colab/Cindergrace_ComfyUI.ipynb`
+- `colab/Comfy2.ipynb`
+
+**Proposed Solution:**
+1. **Modell-Downloads vervollständigen:**
+   - Wan 2.2 14B HuggingFace URL hinzufügen
+   - Wan 2.2 5B HuggingFace URL hinzufügen
+   - Automatische Erkennung bereits vorhandener Modelle
+
+2. **Stabilität verbessern:**
+   - Keep-alive Mechanismus für Colab Sessions
+   - Automatische Wiederverbindung bei Tunnel-Abbruch
+   - Bessere Fehlerbehandlung bei Download-Abbrüchen
+
+3. **Integration mit CINDERGRACE GUI:**
+   - Backend-Konfiguration in Settings Panel
+   - Health-Check für Cloud-Backend
+   - Automatischer Fallback auf lokale Installation
+
+4. **Dokumentation:**
+   - Schritt-für-Schritt Anleitung für Colab Setup
+   - Troubleshooting Guide für häufige Fehler
+   - Kosten-Warnung für Google Colab Pro
+
+**Technical Notes:**
+- Google Colab Free Tier: 12h Session-Limit, GPU-Verfügbarkeit variiert
+- Colab Pro empfohlen für längere Sessions
+- Persistente Speicherung nur mit Google Drive Mount
+
+**Related Issues:**
+- Hängt zusammen mit #015 (Health Check Endpoint)
+- Hängt zusammen mit #018 (Container Support)
+
+---
+
+## 🔧 Workflow Template User Setup
+
+### #030: User Workflow Templates Setup & Documentation
+**Status:** Open
+**Priority:** Medium
+**Impact:** User Experience, Onboarding
+**Assigned Version:** v0.9.0
+
+**Description:**
+User-facing workflow templates are stored in `config/workflow_templates_user/`. These are ComfyUI workflows that users need to configure for their specific setup (models, paths) before exporting as API workflows. Currently no automated setup or documentation exists.
+
+**Current Structure:**
+```
+config/workflow_templates_user/
+  ├── gcv_wan_2.2_14b_i2v.json
+  ├── gcv_wan_2.2_5b_i2v.json
+  ├── gcv_wan22_14B_i2v_gguf.json
+  ├── gcp_flux1_krea_dev_fp8.json
+  ├── gcp_flux1_krea_dev_xxx.json
+  └── gcp_sdxl_lora.json
+```
+
+**Proposed Solution:**
+
+1. **Master Workflow Consolidation:**
+   - Reduce to one "master" workflow per model class using Group Bypass nodes
+   - Example: `wan_2.2_14b_master.json` with bypass groups for:
+     - SageAttention (on/off)
+     - GGUF Loader vs Load Diffusion
+     - High/Low Noise variants
+   - User configures once, exports multiple API workflow variants
+
+2. **Setup Wizard Integration:**
+   - Copy templates to `ComfyUI/user/default/workflows_user/`
+   - Show hint: "Please configure models in ComfyUI before using"
+   - List which workflows were copied
+
+3. **Help Documentation:**
+   - New section in Help tab: "Configuring Workflow Templates"
+   - Step-by-step guide:
+     1. Open master workflow in ComfyUI
+     2. Configure model paths
+     3. Test with Group Bypass toggles
+     4. Export as API workflow with correct naming
+   - Naming convention: `gcv_wan_2.2_14b_i2v_sage.json` etc.
+
+4. **Validation:**
+   - Check if user has configured API workflows
+   - Warn if templates exist but no API exports found
+
+**Benefits:**
+- Users configure fewer workflows (1 per model class instead of 4-6)
+- Easier maintenance and updates
+- Clear separation: User Templates vs API Workflows
+- Better onboarding experience
+
+**Technical Notes:**
+- Group Bypass nodes: Toggle entire node groups on/off in ComfyUI
+- API Export: "Save (API Format)" in ComfyUI menu
+- Naming convention important for WorkflowRegistry detection
+
+**Related Files:**
+- `config/workflow_templates_user/` (user-facing templates)
+- `config/workflow_templates/` (API workflows, gcv_*, gcp_*)
+- `addons/setup_wizard.py` (copy templates)
+- `addons/help_addon.py` (documentation section)
+- `infrastructure/workflow_registry.py` (detect API workflows)
 
 ---
 

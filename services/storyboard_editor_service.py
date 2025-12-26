@@ -32,85 +32,106 @@ class StoryboardEditorService:
         description: str,
         prompt: str,
         duration: float,
-        camera_movement: str = "static",
         width: int | None = None,
         height: int | None = None,
-        character: str = "",
+        characters: list | None = None,
+        character_lora: str | None = None,
         negative_prompt: str = "",
-        wan_motion: dict | None = None,
-        seed: int = -1,
-        cfg_scale: float = 7.0,
-        steps: int = 20,
+        full_prompt: str | None = None,
+        presets: dict | None = None,
+        flux: dict | None = None,
+        wan: dict | None = None,
     ) -> Storyboard:
+        """Add a new shot to the storyboard.
+
+        Args:
+            shot_id: Unique identifier for the shot
+            filename_base: Base name for generated files
+            description: Human-readable description
+            prompt: Base prompt text
+            duration: Duration in seconds
+            width/height: Resolution (defaults to 1024x576)
+            characters: List of character IDs (legacy, multi-select)
+            character_lora: Single character LoRA ID (e.g., "cg_elena")
+            negative_prompt: What to avoid in generation
+            full_prompt: Computed prompt including preset texts
+            presets: Dict of preset keys (style, lighting, mood, etc.)
+            flux: Flux render settings (seed, cfg, steps)
+            wan: Wan render settings (seed, cfg, steps, motion_strength)
+        """
         shot_payload = {
             "shot_id": shot_id,
             "filename_base": filename_base,
             "description": description,
             "prompt": prompt,
             "duration": float(duration),
-            "camera_movement": camera_movement,
             "width": width or 1024,
             "height": height or 576,
         }
 
-        # Add optional fields if provided
-        if character:
-            shot_payload["character"] = character
+        # Character LoRAs (v2.1 format - legacy multi-select)
+        if characters:
+            shot_payload["characters"] = characters
+        # Single character LoRA (new simplified format)
+        if character_lora:
+            shot_payload["character_lora"] = character_lora
         if negative_prompt:
             shot_payload["negative_prompt"] = negative_prompt
-        if wan_motion:
-            shot_payload["wan_motion"] = wan_motion
-        if seed != -1:
-            shot_payload["seed"] = seed
-        if cfg_scale != 7.0:
-            shot_payload["cfg_scale"] = cfg_scale
-        if steps != 20:
-            shot_payload["steps"] = steps
+        if full_prompt:
+            shot_payload["full_prompt"] = full_prompt
+        if presets:
+            shot_payload["presets"] = presets
+        if flux:
+            shot_payload["flux"] = flux
+        if wan:
+            shot_payload["wan"] = wan
 
         shot = Shot.from_dict(shot_payload)
-        setattr(shot, "camera_movement", camera_movement)
         storyboard.shots.append(shot)
         storyboard.raw.setdefault("shots", []).append(shot_payload)
         self.logger.info("Added shot %s to storyboard %s", shot_id, storyboard.project)
         return storyboard
 
     def update_shot(self, storyboard: Storyboard, shot_index: int, **fields) -> Storyboard:
+        """Update a shot at the given index.
+
+        Supported fields:
+            shot_id, filename_base, description, prompt, negative_prompt,
+            full_prompt, duration, width, height, characters (list),
+            presets (dict), flux (dict), wan (dict)
+        """
         if shot_index < 0 or shot_index >= len(storyboard.shots):
             raise IndexError(f"Invalid shot index: {shot_index}")
 
         shot = storyboard.shots[shot_index]
         for key, value in fields.items():
-            # Skip None/empty values except for special cases
-            if value is None or (isinstance(value, str) and value == "" and key not in ["scene", "character", "negative_prompt"]):
+            # Skip None values (but allow empty strings and empty lists)
+            if value is None:
+                continue
+            # Skip empty strings except for fields that can be empty
+            if isinstance(value, str) and value == "" and key not in ["negative_prompt"]:
                 continue
 
-            # Special handling for different field types
-            if key == "camera_movement":
-                setattr(shot, key, value)
-                shot.raw[key] = value
-            elif key == "duration":
+            # Handle different field types
+            if key == "duration":
                 setattr(shot, key, float(value))
                 shot.raw[key] = float(value)
-            elif key in ["width", "height", "seed", "steps"]:
-                # Integer fields
+            elif key in ["width", "height"]:
                 if hasattr(shot, key):
                     setattr(shot, key, int(value))
                 shot.raw[key] = int(value)
-            elif key in ["cfg_scale"]:
-                # Float fields
-                shot.raw[key] = float(value)
-            elif key in ["character", "negative_prompt"]:
-                # String fields (can be empty)
+            elif key == "characters":
+                # List of character IDs (v2.1 format)
+                shot.characters = value if value else []
+                shot.raw[key] = value if value else []
+            elif key in ["negative_prompt", "full_prompt", "description"]:
                 shot.raw[key] = value or ""
-            elif key == "wan_motion":
-                # wan_motion is a dict or None
+            elif key in ["presets", "flux", "wan"]:
+                # Dict fields for preset system
                 if value:
-                    shot.wan_motion = type('MotionSettings', (), value)()
                     shot.raw[key] = value
-                else:
-                    shot.wan_motion = None
-                    if key in shot.raw:
-                        del shot.raw[key]
+                elif key in shot.raw:
+                    del shot.raw[key]
             elif hasattr(shot, key):
                 setattr(shot, key, value)
                 shot.raw[key] = value

@@ -1,8 +1,9 @@
 """Structured logging system for CINDERGRACE pipeline"""
 import logging
 import os
+from collections import deque
 from logging.handlers import RotatingFileHandler
-from typing import Optional
+from typing import Optional, List
 
 
 class PipelineLogger:
@@ -72,6 +73,10 @@ class PipelineLogger:
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
 
+        # UI handler - for displaying logs in the Gradio UI
+        ui_handler = UILogHandler.get_instance()
+        root_logger.addHandler(ui_handler)
+
     @classmethod
     def set_level(cls, level: int):
         """
@@ -87,6 +92,48 @@ class PipelineLogger:
                 handler.setLevel(level)
 
 
+class UILogHandler(logging.Handler):
+    """Handler that stores recent log messages for UI display."""
+
+    _instance: Optional["UILogHandler"] = None
+    MAX_LINES = 100  # Keep last 100 lines in buffer
+
+    def __init__(self):
+        super().__init__()
+        self._buffer: deque = deque(maxlen=self.MAX_LINES)
+        self.setLevel(logging.INFO)
+        self.setFormatter(logging.Formatter(
+            '%(asctime)s [%(levelname)s] %(message)s',
+            datefmt='%H:%M:%S'
+        ))
+
+    @classmethod
+    def get_instance(cls) -> "UILogHandler":
+        """Get singleton instance."""
+        if cls._instance is None:
+            cls._instance = UILogHandler()
+        return cls._instance
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Store formatted log record in buffer."""
+        try:
+            msg = self.format(record)
+            self._buffer.append(msg)
+        except Exception:
+            pass
+
+    def get_logs(self, lines: int = 50, newest_first: bool = True) -> List[str]:
+        """Get last N log lines."""
+        logs = list(self._buffer)[-lines:]
+        if newest_first:
+            logs = logs[::-1]
+        return logs
+
+    def get_logs_text(self, lines: int = 50, newest_first: bool = True) -> str:
+        """Get last N log lines as single string."""
+        return "\n".join(self.get_logs(lines, newest_first))
+
+
 # Convenience function for direct import
 def get_logger(name: str = "cindergrace") -> logging.Logger:
     """
@@ -100,4 +147,4 @@ def get_logger(name: str = "cindergrace") -> logging.Logger:
     return PipelineLogger.get_logger(name)
 
 
-__all__ = ["PipelineLogger", "get_logger"]
+__all__ = ["PipelineLogger", "get_logger", "UILogHandler"]

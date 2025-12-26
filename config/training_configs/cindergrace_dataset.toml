@@ -1,0 +1,15 @@
+# Kohya SDXL Dataset Configuration
+# Character: cindergrace
+
+[general]
+caption_extension = ".txt"
+
+[[datasets]]
+batch_size = 1
+resolution = [768, 768]
+enable_bucket = true
+bucket_no_upscale = true
+
+  [[datasets.subsets]]
+  image_dir = "/home/zorinadmin/comfyui/production/ComfyUI/output/character_training/cindergrace"
+  num_repeats = 10

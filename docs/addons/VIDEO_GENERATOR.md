@@ -1,10 +1,11 @@
-# 🎥 Video Generator
+# 🎥 Video (Video Generator)
 
-**Tab Name:** 🎥 Video Generator
+**Tab Name:** 🎥 Video
 **File:** `addons/video_generator.py`
-**Lines:** 373 (after Sprint 2 refactoring, down from 960)
+**Lines:** ~680 (post refactor with shared helpers)
 **Services:** VideoGenerationService, VideoPlanBuilder, LastFrameExtractor
 **State:** Stateful (UI state persisted to `<project>/video/_state.json`)
+**Shared Helpers:** `storyboard_section`, `storyboard_status_md`, `load_storyboard_from_config`, `plan_formatter` (Plan/Shot Markdown)
 
 ---
 
@@ -12,11 +13,14 @@
 
 | Property | Value |
 |----------|-------|
-| **Purpose** | Generate video clips from selected keyframes using Wan 2.2 (HunyuanVideo) |
+| **Purpose** | Generate video clips from selected keyframes using Wan 2.2 or LTX-Video |
 | **Main Files** | `addons/video_generator.py`, `services/video/video_generation_service.py`, `services/video/video_plan_builder.py` |
-| **Dependencies** | VideoGenerationService, VideoPlanBuilder, LastFrameExtractor, ProjectStore, ModelValidator, StateStore |
+| **Dependencies** | VideoGenerationService, VideoPlanBuilder, LastFrameExtractor, ProjectStore, ModelValidator, StateStore, WorkflowRegistry |
 | **State Management** | UI state in `<project>/video/_state.json`, persists across refresh |
 | **Output Location** | `<project>/video/shot_<id>_seg_<N>.mp4`, LastFrames in `_startframes/` |
+| **SageAttention** | Optional acceleration via `📁 Projekt` Tab → `*_sage.json` workflow variants |
+| **Workflow Prefix** | `gcv_*` (Video generation workflows) |
+| **Model Selection** | Dynamic model dropdown based on workflow's `.models` file |
 
 ---
 
@@ -24,7 +28,7 @@
 
 The Video Generator enables:
 
-1. **Load Storyboard + Selection** - Load storyboard and selected keyframes JSON
+1. **Load Storyboard + Selection** - Load storyboard (shared loader) and selected keyframes JSON
 2. **Build Generation Plan** - Split shots >3s into 3-second segments with LastFrame chaining
 3. **Validate Models** - Check if required Wan models are present in ComfyUI
 4. **Generate Videos** - For each segment:
@@ -70,22 +74,23 @@ Shot 001 (duration: 5 seconds)
 ```python
 # Setup Section
 project_status = gr.Markdown()  # Active project + path
-storyboard_dropdown = gr.Dropdown()  # Storyboards from project
-selection_dropdown = gr.Dropdown()  # Selections from project/selected/
-refresh_storyboard_btn = gr.Button("↻")
-refresh_selection_btn = gr.Button("↻")
+storyboard_section = create_storyboard_section(...)  # Accordion + reload
+storyboard_md = storyboard_section.info_md
+load_storyboard_btn = storyboard_section.reload_btn
+selection_status = gr.Markdown()
 workflow_dropdown = gr.Dropdown()  # Wan workflows
 refresh_workflow_btn = gr.Button("↻")
 
 # Plan Section
 build_plan_btn = gr.Button("🗓️ Build Plan")
-plan_display = gr.JSON()  # Show generation plan (segments)
+plan_summary = gr.Markdown()  # Show generation plan summary (formatted helper)
+plan_display = gr.JSON()  # Raw plan (segments)
 model_check_display = gr.Markdown()  # Missing models warning
 
 # Generation Section
 start_generation_btn = gr.Button("▶️ Start Generation")
 status_display = gr.Markdown()  # Current status
-progress_details = gr.Markdown()  # Detailed progress per segment
+progress_details = gr.Markdown()  # Detailed progress per segment (persisted)
 
 # Video Player Section
 video_player = gr.Video()  # Display last generated clip
@@ -375,18 +380,19 @@ See BACKLOG.md Issue #003 for implementation plan.
 ## Key Files
 
 ### Primary Files
-- **Addon:** `addons/video_generator.py` (373 lines)
-- **Service:** `services/video/video_generation_service.py` (100% coverage)
-- **Service:** `services/video/video_plan_builder.py` (100% coverage)
-- **Service:** `services/video/last_frame_extractor.py` (100% coverage)
-- **Tests:** `tests/unit/services/video/test_video_generation_service.py`
-- **Tests:** `tests/unit/services/video/test_video_plan_builder.py`
-- **Tests:** `tests/unit/services/video/test_last_frame_extractor.py`
+- **Addon:** `addons/video_generator.py` (~700 lines)
+- **Service:** `services/video/video_generation_service.py` (orchestration)
+- **Service:** `services/video/video_plan_builder.py` (plan generation)
+- **Service:** `services/video/file_operations.py` (video file copying/moving)
+- **Service:** `services/video/last_frame_extractor.py` (ffmpeg wrapper)
+- **Tests:** `tests/unit/test_video_services.py`
 
 ### Related Files
 - **Infrastructure:** `infrastructure/model_validator.py`
 - **Infrastructure:** `infrastructure/state_store.py`
-- **Infrastructure:** `infrastructure/comfy_api/comfy_api_client.py`
+- **Infrastructure:** `infrastructure/workflow_registry.py` (gcv_* workflow discovery, SageAttention resolution)
+- **Infrastructure:** `infrastructure/comfy_api/client.py`
+- **Infrastructure:** `infrastructure/comfy_api/updaters.py` (SaveVideo, LoadImage updaters)
 
 ---
 
@@ -412,9 +418,86 @@ See BACKLOG.md Issue #003 for implementation plan.
 **From `config/settings.json`:**
 - `comfy_url` - ComfyUI server URL
 - `comfy_root` - For model validation
+- `use_sage_attention` - Enable SageAttention for faster inference (see below)
 
-**From `config/workflow_presets.json`:**
-- `wan` - List of Wan workflows for dropdown
+**From `📁 Projekt` Tab:**
+- Active project selection determines output directory
+- Resolution configured per-project is applied to all video generation
+- SageAttention toggle under "🎬 Video Generation" section
+
+**Workflow Registry (SQLite-backed):**
+- `gcv_*` - Video workflows (Wan 2.2 i2v)
+- `gcv_*_sage.json` - SageAttention variants (auto-selected when enabled)
+
+### SageAttention Support
+
+SageAttention provides faster inference on compatible GPUs (RTX 30xx+, CUDA 12.0+).
+
+**Configuration:**
+1. Enable in `📁 Projekt` Tab under "🎬 Video Generation" section
+2. Toggle "SageAttention (Faster)" checkbox
+3. Workflow selection automatically resolves to `*_sage.json` variant if available
+
+**How It Works:**
+```python
+# In video_generator.py generate_clips():
+use_sage = self.config.use_sage_attention()
+resolved_workflow = self.workflow_registry.resolve_workflow(workflow_file, use_sage=use_sage)
+# gcv_wan_2.2_14B_i2v_gguf.json → gcv_wan_2.2_14B_i2v_gguf_sage.json
+```
+
+**Workflow Variants:**
+| Base Workflow | Sage Variant | Status |
+|---------------|--------------|--------|
+| `gcv_wan_2.2_14B_i2v_gguf.json` | `gcv_wan_2.2_14B_i2v_gguf_sage.json` | ✅ Available |
+| `gcv_wan_2.2_14b_i2v.json` | - | ❌ No Sage variant |
+| `gcv_wan_2.2_5b_i2v.json` | - | ❌ No Sage variant |
+| `gcv_ltvx_i2v.json` | - | ✅ LTX-Video (Low VRAM) |
+
+**Requirements:**
+- NVIDIA GPU with RTX 30xx or newer
+- CUDA 12.0+
+- ComfyUI SageAttention node installed
+
+### Model Selection
+
+Das Video Model Dropdown ermöglicht die Auswahl verschiedener Modell-Varianten ohne Workflow-Wechsel.
+
+**Funktionsweise:**
+1. Jeder Workflow kann eine `.models` Datei haben (z.B. `gcv_ltvx_i2v.models`)
+2. Das Dropdown zeigt nur verfügbare (installierte) Modelle
+3. Bei Auswahl wird das Modell in den `[MODEL]` markierten Loader-Nodes injiziert
+
+**Unterstützte Loader-Typen:**
+- `UNETLoader` (Flux)
+- `UnetLoaderGGUF` (GGUF-Modelle)
+- `CheckpointLoaderSimple` (LTX-Video, SD)
+
+**Beispiel `.models` Datei:**
+```
+checkpoints/ltx-video-2b-v0.9.5.safetensors
+checkpoints/ltxv-13b-0.9.7-dev-fp8.safetensors
+```
+
+### LTX-Video Support
+
+LTX-Video ist eine Low-VRAM Alternative zu Wan 2.2 für kleinere GPUs.
+
+| Eigenschaft | Wan 2.2 | LTX-Video 2B |
+|-------------|---------|--------------|
+| VRAM | 12GB+ | 6-8GB |
+| Qualität | Sehr gut | Gut |
+| Geschwindigkeit | Langsam | Schnell |
+| Auflösungen | 16:9 / 9:16 | Flexibel (÷32) |
+
+**LTX-Video Auflösungen:**
+| Auflösung | Format | Empfehlung |
+|-----------|--------|------------|
+| 768×512 | 3:2 | ⭐ Low VRAM Standard |
+| 512×768 | 2:3 | Portrait |
+| 512×512 | 1:1 | Quadrat möglich! |
+
+**Frame Count Regel:** Muss `(8*n)+1` sein (65, 97, 129 Frames)
 
 ---
 
@@ -461,6 +544,44 @@ See BACKLOG.md Issue #003 for implementation plan.
 - **Workaround:** Trim in post-production
 - **Target:** v0.7.0
 
+### Troubleshooting
+
+**Video remains in /output instead of project folder:**
+
+If generated videos stay in ComfyUI's `/output` directory instead of being moved to `<project>/video/`:
+
+1. **Check clip_name matching:**
+   - The search pattern uses `clip_name` from plan entry (e.g., `shot001_intro`)
+   - Verify the generated filename matches: `{clip_name}*.mp4`
+   - Check `logs/pipeline.log` for "Searching for video files with clip_name='...'"
+
+2. **Check output directory:**
+   - `SaveVideo` node saves to `{comfy_root}/output/` (no subdirectory)
+   - `VHS_VideoCombine` saves to `{comfy_root}/output/video/`
+   - Both locations are searched by `file_operations.py`
+
+3. **Timing issues:**
+   - Initial wait: 60 seconds (configurable via `video_initial_wait`)
+   - Retry: 20 attempts × 30 seconds (configurable)
+   - Total max wait: ~11 minutes
+
+4. **Log diagnostics:**
+   ```bash
+   grep -E "(Searching for|Pattern.*found|Successfully moved)" logs/pipeline.log
+   ```
+
+5. **Manual verification:**
+   ```bash
+   # List videos in ComfyUI output
+   ls -la ~/comfyui/output/*.mp4
+   ls -la ~/comfyui/output/video/*.mp4
+   ```
+
+**Video generation completes but no file found:**
+- Check if `SaveVideo` node has correct `filename_prefix` injection
+- Verify workflow uses `SaveVideo` or `VHS_VideoCombine` node type
+- Check ComfyUI console for encoding errors
+
 ---
 
 ## Related Documentation
@@ -473,5 +594,5 @@ See BACKLOG.md Issue #003 for implementation plan.
 
 ---
 
-**Last Updated:** December 13, 2025
-**Version:** v0.5.1
+**Last Updated:** December 21, 2025
+**Version:** v0.9.0

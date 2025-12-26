@@ -1,0 +1,79 @@
+                    INFO     caching latents...                                        train_util.py:1166
+accelerator device: cuda
+FLUX: Block swap enabled. Swapping 20 blocks, double blocks: 10, single blocks: 20.
+  0%|          | 0/16 [00:00<?, ?it/s]
+  6%|▋         | 1/16 [00:01<00:15,  1.01s/it]
+ 12%|█▎        | 2/16 [00:01<00:08,  1.66it/s]
+ 19%|█▉        | 3/16 [00:01<00:05,  2.19it/s]
+ 25%|██▌       | 4/16 [00:01<00:04,  2.50it/s]
+ 31%|███▏      | 5/16 [00:02<00:04,  2.72it/s]
+ 38%|███▊      | 6/16 [00:02<00:03,  2.94it/s]
+ 44%|████▍     | 7/16 [00:02<00:02,  3.06it/s]
+ 50%|█████     | 8/16 [00:03<00:02,  3.10it/s]
+ 56%|█████▋    | 9/16 [00:03<00:02,  3.11it/s]
+ 62%|██████▎   | 10/16 [00:03<00:01,  3.20it/s]
+ 69%|██████▉   | 11/16 [00:04<00:01,  3.18it/s]
+ 75%|███████▌  | 12/16 [00:04<00:01,  3.17it/s]
+ 81%|████████▏ | 13/16 [00:04<00:00,  3.16it/s]
+ 88%|████████▊ | 14/16 [00:05<00:00,  3.21it/s]
+ 94%|█████████▍| 15/16 [00:05<00:00,  3.09it/s]
+100%|██████████| 16/16 [00:05<00:00,  3.18it/s]
+100%|██████████| 16/16 [00:05<00:00,  2.83it/s]
+2025-12-17 21:53:02 INFO     move vae and unet to cpu to save memory            flux_train_network.py:232
+                    INFO     move text encoders to gpu                          flux_train_network.py:240
+Traceback (most recent call last):
+  File "/home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/flux_train_network.py", line 547, in <module>
+    trainer.train(args)
+  File "/home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/train_network.py", line 633, in train
+    self.cache_text_encoder_outputs_if_needed(args, accelerator, unet, vae, text_encoders, train_dataset_group, weight_dtype)
+  File "/home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/flux_train_network.py", line 242, in cache_text_encoder_outputs_if_needed
+    text_encoders[1].to(accelerator.device)
+  File "/home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/.venv/lib/python3.12/site-packages/transformers/modeling_utils.py", line 4276, in to
+    return super().to(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1371, in to
+    return self._apply(convert)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 930, in _apply
+    module._apply(fn)
+  File "/home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 930, in _apply
+    module._apply(fn)
+  File "/home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 930, in _apply
+    module._apply(fn)
+  [Previous line repeated 4 more times]
+  File "/home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 957, in _apply
+    param_applied = fn(param)
+                    ^^^^^^^^^
+  File "/home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1357, in convert
+    return t.to(
+           ^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 80.00 MiB. GPU 0 has a total capacity of 15.47 GiB of which 88.44 MiB is free. Process 13277 has 10.07 GiB memory in use. Including non-PyTorch memory, this process has 4.73 GiB memory in use. Of the allocated memory 4.56 GiB is allocated by PyTorch, and 14.47 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+
+
+
+
+1:52:05 [INFO] cindergrace.__main__: ============================================================
+21:52:05 [INFO] cindergrace.services.character_lora_service: Scanned 1 cg_* character LoRAs from /home/zorinadmin/comfyui/production/ComfyUI/models/loras
+21:52:05 [INFO] cindergrace.services.character_lora_service: Scanned 1 cg_* character LoRAs from /home/zorinadmin/comfyui/production/ComfyUI/models/loras
+21:52:07 [INFO] cindergrace.services.character_lora_service: Scanned 1 cg_* character LoRAs from /home/zorinadmin/comfyui/production/ComfyUI/models/loras
+21:52:10 [INFO] cindergrace.__main__: 🚀 Launching CINDERGRACE GUI...
+21:52:10 [INFO] cindergrace.__main__: ============================================================
+* Running on local URL:  http://127.0.0.1:7860
+* To create a public link, set `share=True` in `launch()`.
+21:52:15 [INFO] cindergrace.addons.video_generator: Video Generator: Auto-loading storyboard and selection...
+21:52:15 [WARNING] cindergrace.addons.video_generator: Video Generator: No storyboard configured
+21:52:15 [WARNING] cindergrace.addons.keyframe_selector: No storyboard selected in project tab
+21:52:15 [INFO] cindergrace.services.character_lora_service: Scanned 1 cg_* character LoRAs from /home/zorinadmin/comfyui/production/ComfyUI/models/loras
+21:52:15 [INFO] cindergrace.services.system_detector: System-Check: Linux, 4/6 Abhängigkeiten OK
+21:52:37 [INFO] cindergrace.services.kohya_trainer_service: Generated dataset config: /home/zorinadmin/projekte/cindergrace_gui/config/training_configs/cindergrace_dataset.toml
+21:52:37 [INFO] cindergrace.services.kohya_trainer_service: Generated Kohya training config: /home/zorinadmin/projekte/cindergrace_gui/config/training_configs/cindergrace_kohya_training.toml
+21:52:37 [INFO] cindergrace.services.kohya_trainer_service: Starting Kohya training: python /home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/flux_train_network.py --config_file /home/zorinadmin/projekte/cindergrace_gui/config/training_configs/cindergrace_kohya_training.toml
+21:52:37 [INFO] cindergrace.services.kohya_trainer_service: Using local sd-scripts Python: /home/zorinadmin/projekte/cindergrace_gui/tools/sd-scripts/.venv/bin/python
+21:52:37 [INFO] cindergrace.services.kohya_trainer_service: Kohya training started with PID: 21003
+21:52:45 [WARNING] cindergrace.services.kohya_trainer_service: Training warning/error:                     INFO     mean ar error (without repeats): 0.10378370098039201      train_util.py:1071
+21:52:56 [WARNING] cindergrace.services.kohya_trainer_service: Training warning/error: accelerator device: cuda
+21:53:03 [WARNING] cindergrace.services.kohya_trainer_service: Training warning/error: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 80.00 MiB. GPU 0 has a total capacity of 15.47 GiB of which 88.44 MiB is free. Process 13277 has 10.07 GiB memory in use. Including non-PyTorch memory, this process has 4.73 GiB memory in use. Of the allocated memory 4.56 GiB is allocated by PyTorch, and 14.47 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+21:53:07 [ERROR] cindergrace.services.kohya_trainer_service: Kohya training failed with exit code: 1
+
+

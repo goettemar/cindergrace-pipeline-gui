@@ -97,7 +97,7 @@ def test_video_generator_lists_selection_json(monkeypatch, tmp_path):
 def test_video_generator_project_status(monkeypatch, tmp_path):
     addon = _stub_video_addon(monkeypatch, tmp_path, project_data=None)
     missing = addon._project_status_md()
-    assert "Kein aktives Projekt" in missing
+    assert "No active project" in missing
 
     project_addon = _stub_video_addon(
         monkeypatch,
@@ -193,7 +193,7 @@ def test_keyframe_generator_storyboard_paths(monkeypatch, tmp_path):
 @pytest.mark.unit
 def test_keyframe_generator_project_status(monkeypatch, tmp_path):
     addon = _stub_keyframe_addon(monkeypatch, tmp_path, project_data=None)
-    assert "Kein aktives Projekt" in addon._project_status_md()
+    assert "No active project" in addon._project_status_md()
 
     addon_with_project = _stub_keyframe_addon(
         monkeypatch,
@@ -264,7 +264,7 @@ def test_keyframe_selector_selection_summary(monkeypatch, tmp_path):
     addon = _stub_selector_addon(monkeypatch, tmp_path, project_data=None)
 
     empty_summary = addon._format_selection_summary({}, {"shots": [{"shot_id": "1"}]})
-    assert "Noch keine Keyframes" in empty_summary
+    assert "No keyframes selected" in empty_summary
 
     selections = {"1": {"selected_file": "shot1.png", "selected_variant": 2}}
     storyboard = {"shots": [{"shot_id": "1"}]}
@@ -303,7 +303,7 @@ def test_video_generator_validation_and_workflow_errors(monkeypatch, tmp_path):
 
     workflow, wf_error = addon._load_workflow_template(DummyAPI(), "missing.json")
     assert workflow is None
-    assert wf_error and "Workflow konnte nicht geladen werden" in wf_error
+    assert wf_error and "Failed to load workflow" in wf_error
 
 
 @pytest.mark.unit
@@ -316,7 +316,7 @@ def test_selector_storyboard_load_error(monkeypatch, tmp_path):
 
     model, error = addon._load_storyboard_model("bad.json")
     assert model is None
-    assert error and "Storyboard laden fehlgeschlagen" in error
+    assert error and "Failed to load storyboard" in error
 
 
 @pytest.mark.unit
@@ -336,11 +336,11 @@ def test_settings_addon_save_settings(monkeypatch):
     addon = sp.SettingsAddon()
 
     ok = addon.save_settings("http://localhost:8188", "/tmp/root")
-    assert "Gespeichert" in ok
+    assert "Saved" in ok
     assert addon.config.calls == [("comfy_url", "http://localhost:8188"), ("comfy_root", "/tmp/root")]
 
     error = addon.save_settings("invalid-url", "")
-    assert "Fehler" in error
+    assert "Error" in error
 
 
 @pytest.mark.unit

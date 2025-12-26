@@ -1,0 +1,41 @@
+# Cloudignore - Files to exclude from cloud sync (Google Drive, Dropbox, etc.)
+
+# Temporary and archive files
+temp/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Test coverage
+htmlcov/
+coverage.xml
+.coverage
+
+# Logs
+*.log
+logs/
+
+# Database
+data/cindergrace.db
+
+# Config with secrets
+config/settings.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large model files (if any)
+*.ckpt
+*.safetensors
+*.bin

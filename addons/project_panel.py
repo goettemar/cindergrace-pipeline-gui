@@ -1,20 +1,24 @@
 """Project selection/creation addon."""
-import json
 import os
 import sys
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import gradio as gr
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from addons.base_addon import BaseAddon
+from addons.components import (
+    create_delete_confirm,
+    create_status_log,
+    append_status,
+    project_status_md,
+    create_resolution_guide,
+)
 from infrastructure.config_manager import ConfigManager
 from infrastructure.project_store import ProjectStore
 from infrastructure.error_handler import handle_errors
 from infrastructure.logger import get_logger
-from domain.exceptions import ProjectError, ProjectNotFoundError
 from domain.validators import ProjectCreateInput
 
 logger = get_logger(__name__)
@@ -26,225 +30,263 @@ class ProjectAddon(BaseAddon):
     def __init__(self):
         super().__init__(
             name="Project Manager",
-            description="Manage CINDERGRACE project folders under ComfyUI/output"
+            description="Manage CINDERGRACE project folders under ComfyUI/output",
+            category="project"
         )
         self.config = ConfigManager()
         self.project_manager = ProjectStore(self.config)
 
     def get_tab_name(self) -> str:
-        return "📁 Projekt"
+        return "📁 Project"
 
     def render(self) -> gr.Blocks:
         project = self.project_manager.get_active_project(refresh=True)
         valid_path = self._is_comfy_path_valid()
-        output_base = self._derive_output_base()
+        has_projects = len(self._project_choices()) > 0
 
         with gr.Blocks() as interface:
-            gr.Markdown("# 📁 Projektverwaltung")
+            # Unified header: Tab name left, project status right
+            project_status = gr.HTML(project_status_md(self.project_manager, "📁 Project Manager"))
+
             gr.Markdown(
-                "Definiere hier dein aktives Projekt. Jeder Eintrag entspricht einem Ordner unter "
-                "`<ComfyUI>/output/<projekt>` – inklusive `project.json`. "
-                "Alle nachfolgenden Tabs schreiben/lesen ausschließlich in diesen Projektordner."
+                "Create or load a project. "
+                "Each project stores your keyframes and videos in its own folder."
             )
 
-            warning_box = gr.Markdown("", visible=False)
-
-            gr.HTML(
-                """
-                <style>
-                  .compact-button button { min-height: 38px; padding: 6px 10px; }
-                  .icon-button button { min-width: 38px; max-width: 42px; min-height: 38px; padding: 6px; }
-                  .inline-row { gap: 6px; }
-                  .primary-full button { width: 100%; }
-                  .status-panel textarea {
-                    min-height: 180px;
-                    max-height: 220px;
-                    overflow-y: auto;
-                    font-family: monospace;
-                  }
-                </style>
-                """
+            # Warning if ComfyUI path is missing
+            warning_box = gr.Markdown(
+                "## ⚠️ ComfyUI path not configured\n\n"
+                "Please set the path to ComfyUI in the **Settings tab** first.",
+                visible=not valid_path,
+                elem_classes=["warning-box"],
             )
 
-            status_bar = gr.Markdown(self._status_bar(project))
-            gr.Markdown(self._comfy_root_info())
+            # Hint if no project exists (dynamically show/hide)
+            no_project_hint = gr.Markdown(
+                "## 📋 No project yet\n\n"
+                "Create your first project to get started. "
+                "Enter a name on the left and click **Create Project**.",
+                visible=not has_projects and valid_path,
+                elem_classes=["info-box"],
+            )
 
+            # Main area
             with gr.Row():
-                with gr.Column():
-                    with gr.Group():
-                        gr.Markdown("### Projekt")
-                        project_overview = gr.Markdown(self._project_overview(project))
-                        with gr.Accordion("Details anzeigen", open=False):
-                            project_json = gr.Code(
-                                value=self._project_json(project),
-                                language="json",
-                                label="project.json",
-                                lines=12
-                            )
+                # === LEFT COLUMN: Create & load project ===
+                with gr.Column(scale=1):
+                    # Create project
+                    gr.Markdown("### Create Project")
+                    new_name = gr.Textbox(
+                        label="Project Name",
+                        placeholder="e.g. my-music-video",
+                        interactive=valid_path,
+                    )
+                    create_btn = gr.Button(
+                        "🚀 Create Project",
+                        variant="primary",
+                        interactive=valid_path,
+                        size="lg",
+                    )
 
-                        gr.Markdown("**Projekt wechseln**")
-                        with gr.Row(elem_classes=["inline-row"]):
-                            project_dropdown = gr.Dropdown(
-                                choices=self._project_choices(),
-                                value=project["slug"] if project else None,
-                                label="Projekt auswählen",
-                                scale=8,
-                                interactive=valid_path,
-                            )
-                            refresh_btn = gr.Button(
-                                "↻",
-                                variant="secondary",
-                                elem_classes=["icon-button"],
-                                interactive=valid_path,
-                                scale=1,
-                                min_width=42,
-                            )
-                        with gr.Row():
-                            load_btn = gr.Button("📂 Projekt laden", variant="primary", elem_classes=["primary-full"], interactive=valid_path)
+                    gr.Markdown("---")
 
-                        gr.Markdown("**Neues Projekt anlegen**")
-                        new_name = gr.Textbox(label="Projektname", placeholder="z.B. CINDERGRACE Testprojekt", interactive=valid_path)
-                        create_btn = gr.Button("➕ Projekt erstellen", variant="primary", elem_classes=["primary-full"], interactive=valid_path)
-
-                with gr.Column():
-                    with gr.Group():
-                        gr.Markdown("### Projekt-Defaults")
-                        gr.Textbox(label="ComfyUI Pfad", value=self.config.get_comfy_root(), interactive=False)
-                        gr.Textbox(label="Output Base", value=output_base, interactive=False, info="/output befindet sich innerhalb des ComfyUI Installationspfads.")
-                        with gr.Row(elem_classes=["inline-row"]):
-                            storyboard_dropdown = gr.Dropdown(
-                                choices=self._storyboard_choices(),
-                                value=self.config.get_current_storyboard(),
-                                label="Storyboard wählen (gilt für alle Tabs)",
-                                scale=8,
-                                interactive=valid_path
-                            )
-                            refresh_storyboard_btn = gr.Button(
-                                "↻",
-                                variant="secondary",
-                                elem_classes=["icon-button"],
-                                interactive=valid_path,
-                                scale=1,
-                                min_width=42,
-                            )
-
-                        resolution_dropdown = gr.Dropdown(
-                            choices=self._resolution_choices(),
-                            value=self.config.get_resolution_preset(),
-                            label="Globale Auflösung (gilt für Keyframes & Video)",
-                            info="Einheitliche Breite/Höhe für alle Shots",
-                            interactive=valid_path,
+                    # Load project
+                    gr.Markdown("### Load Project")
+                    with gr.Row():
+                        project_dropdown = gr.Dropdown(
+                            choices=self._project_choices(),
+                            value=project["slug"] if project else None,
+                            label="Existing Project",
+                            scale=8,
+                            interactive=valid_path and has_projects,
                         )
-                        defaults_btn = gr.Button("✅ Defaults anwenden", variant="primary", elem_classes=["primary-full"], interactive=valid_path)
-                        globals_status = gr.Markdown(self._globals_status())
+                        refresh_btn = gr.Button(
+                            "↻",
+                            variant="secondary",
+                            interactive=valid_path,
+                            scale=1,
+                            min_width=42,
+                        )
+                    load_btn = gr.Button(
+                        "📂 Load Project",
+                        variant="primary",
+                        interactive=valid_path and has_projects,
+                    )
 
-            status_log = gr.Textbox(
-                label="Status / Aktionen",
-                lines=10,
-                max_lines=10,
-                interactive=False,
-                value=self._init_status(),
-                elem_classes=["status-panel"]
-            )
+                    gr.Markdown("---")
 
-            lock_check_btn = gr.Button("Pfad prüfen", variant="secondary")
+                    # Delete project - with shared Component
+                    gr.Markdown("### Delete Active Project")
+                    delete_ui = create_delete_confirm(
+                        trigger_label="🗑️ Delete Active Project",
+                        confirm_warning="All project files will be permanently deleted!",
+                    )
+                    # Set initial interactive state
+                    delete_ui.trigger_btn.interactive = valid_path and project is not None
 
-            # Wiring
+                # === RIGHT COLUMN: Active Project & Settings ===
+                with gr.Column(scale=1):
+                    gr.Markdown("### Active Project")
+                    with gr.Group():
+                        project_summary = gr.Markdown(self._project_summary(project))
+
+                    gr.Markdown("---")
+
+                    # Settings
+                    gr.Markdown("### Settings")
+                    resolution_dropdown = gr.Dropdown(
+                        choices=self._resolution_choices(),
+                        value=self.config.get_resolution_preset(),
+                        label="Global Resolution",
+                        info="16:9 = Landscape (YouTube, TV) · 9:16 = Portrait (TikTok, Reels)",
+                        interactive=valid_path,
+                    )
+                    # Resolution guide - collapsible info panel
+                    create_resolution_guide(open_by_default=False)
+
+                    sage_checkbox = gr.Checkbox(
+                        value=self.config.use_sage_attention(),
+                        label="⚡ Enable SageAttention",
+                        info="Faster inference on compatible GPUs (RTX 30xx+, CUDA 12.0+). Workflows with _sage.json suffix are automatically used.",
+                        interactive=valid_path,
+                    )
+                    save_btn = gr.Button(
+                        "💾 Save Project",
+                        variant="primary",
+                        interactive=valid_path and project is not None,
+                    )
+
+            # Status / Actions Log - with shared Component
+            gr.Markdown("### Status / Actions")
+            status = create_status_log(lines=6, max_lines=8)
+
+            # === Event Handlers ===
             refresh_btn.click(
                 fn=self._refresh_projects,
-                inputs=[status_log],
-                outputs=[project_dropdown, status_log]
+                inputs=[status.textbox],
+                outputs=[project_dropdown, load_btn, status.textbox],
             )
 
             load_btn.click(
                 fn=self._load_project,
-                inputs=[project_dropdown, status_log],
-                outputs=[project_overview, project_json, project_dropdown, status_bar, status_log]
+                inputs=[project_dropdown, status.textbox],
+                outputs=[
+                    project_summary,
+                    project_dropdown,
+                    save_btn,
+                    delete_ui.trigger_btn,
+                    status.textbox,
+                ],
             )
 
             create_btn.click(
                 fn=self._create_project,
-                inputs=[new_name, status_log],
-                outputs=[project_overview, project_json, project_dropdown, new_name, status_bar, status_log]
-            )
-
-            refresh_storyboard_btn.click(
-                fn=self._refresh_storyboards,
-                inputs=[status_log],
-                outputs=[storyboard_dropdown, status_log]
-            )
-
-            defaults_btn.click(
-                fn=self._apply_defaults,
-                inputs=[storyboard_dropdown, resolution_dropdown, status_log],
-                outputs=[globals_status, resolution_dropdown, status_bar, status_log]
-            )
-
-            lock_check_btn.click(
-                fn=self._reevaluate_lock_state,
-                inputs=[status_log],
+                inputs=[new_name, status.textbox],
                 outputs=[
-                    warning_box,
+                    project_summary,
                     project_dropdown,
-                    refresh_btn,
-                    load_btn,
                     new_name,
-                    create_btn,
-                    storyboard_dropdown,
-                    refresh_storyboard_btn,
-                    resolution_dropdown,
-                    defaults_btn,
-                    status_bar,
-                    status_log,
+                    load_btn,
+                    save_btn,
+                    no_project_hint,
+                    status.textbox,
                 ],
             )
 
-            if not valid_path:
-                warning_box.update(value="**⚠️ ComfyUI Installationspfad fehlt/ist ungültig. Bitte zuerst im Settings-Tab setzen.**", visible=True)
+            save_btn.click(
+                fn=self._save_settings,
+                inputs=[resolution_dropdown, sage_checkbox, status.textbox],
+                outputs=[project_summary, status.textbox],
+            )
+
+            # Delete: Show confirmation first
+            delete_ui.trigger_btn.click(
+                fn=self._show_delete_confirm,
+                inputs=[],
+                outputs=[delete_ui.confirm_text, delete_ui.confirm_group],
+            )
+
+            # Delete: Cancel
+            delete_ui.cancel_btn.click(
+                fn=lambda: gr.update(visible=False),
+                outputs=[delete_ui.confirm_group],
+            )
+
+            # Delete: Confirm and delete
+            delete_ui.confirm_btn.click(
+                fn=self._delete_project,
+                inputs=[status.textbox],
+                outputs=[
+                    project_summary,
+                    project_dropdown,
+                    load_btn,
+                    delete_ui.trigger_btn,
+                    save_btn,
+                    delete_ui.confirm_group,
+                    no_project_hint,
+                    status.textbox,
+                ],
+            )
+
+            # Refresh project status on tab load
+            interface.load(
+                fn=self._on_tab_load,
+                outputs=[project_status]
+            )
 
         return interface
+
+    def _on_tab_load(self):
+        """Refresh project status when tab loads."""
+        self.config.refresh()
+        return project_status_md(self.project_manager, "📁 Project Manager")
 
     # -----------------------------
     # UI callbacks
     # -----------------------------
     def _refresh_projects(self, current_status: str):
+        choices = self._project_choices()
         project = self.project_manager.get_active_project(refresh=True)
-        status = self._append_status(
-            current_status,
-            f"Projektliste aktualisiert ({len(self._project_choices())} Einträge)"
+        has_projects = len(choices) > 0
+        new_status = append_status(
+            current_status, f"Project list updated ({len(choices)} projects)"
         )
-        return gr.update(choices=self._project_choices(), value=project["slug"] if project else None), status
+        return (
+            gr.update(choices=choices, value=project["slug"] if project else None),
+            gr.update(interactive=has_projects),
+            new_status,
+        )
 
     def _load_project(self, slug: Optional[str], current_status: str):
         if not slug:
             project = self.project_manager.get_active_project(refresh=True)
             return (
-                self._project_overview(project),
-                self._project_json(project),
+                self._project_summary(project),
                 gr.update(value=project["slug"] if project else None),
-                self._status_bar(project),
-                self._append_status(current_status, "❌ Bitte ein Projekt auswählen."),
+                gr.update(interactive=project is not None),  # save_btn
+                gr.update(interactive=project is not None),  # delete_btn
+                append_status(current_status, "❌ Please select a project."),
             )
 
         project = self.project_manager.set_active_project(slug)
         if not project:
             return (
-                self._project_overview(None),
-                "{}",
+                self._project_summary(None),
                 gr.update(choices=self._project_choices(), value=None),
-                self._status_bar(None),
-                self._append_status(current_status, f"❌ Projekt `{slug}` wurde nicht gefunden."),
+                gr.update(interactive=False),  # save_btn
+                gr.update(interactive=False),  # delete_btn
+                append_status(current_status, f"❌ Project `{slug}` not found."),
             )
 
         return (
-            self._project_overview(project),
-            self._project_json(project),
+            self._project_summary(project),
             gr.update(value=project["slug"]),
-            self._status_bar(project),
-            self._append_status(current_status, f"✅ Projekt geladen: {project['name']} ({project['slug']})"),
+            gr.update(interactive=True),  # save_btn
+            gr.update(interactive=True),  # delete_btn
+            append_status(current_status, f"✅ Project loaded: {project['name']}"),
         )
 
-    @handle_errors("Konnte Projekt nicht erstellen")
+    @handle_errors("Could not create project")
     def _create_project(self, name: str, current_status: str):
         logger.info(f"Creating new project: {name}")
 
@@ -255,276 +297,194 @@ class ProjectAddon(BaseAddon):
         project = self.project_manager.create_project(validated_name)
         logger.info(f"✓ Project created: {project['name']} ({project['slug']})")
 
+        choices = self._project_choices()
         return (
-            self._project_overview(project),
-            self._project_json(project),
-            gr.update(choices=self._project_choices(), value=project["slug"]),
-            "",
-            self._status_bar(project),
-            self._append_status(current_status, f"✅ Projekt erstellt: {project['name']} ({project['slug']})"),
+            self._project_summary(project),
+            gr.update(choices=choices, value=project["slug"]),
+            "",  # Clear input
+            gr.update(interactive=True),  # Enable load button
+            gr.update(interactive=True),  # Enable save button
+            gr.update(visible=False),  # Hide no_project_hint
+            append_status(current_status, f"✅ Project created: {project['name']}"),
         )
 
+    def _save_settings(self, resolution_key: str, use_sage: bool, current_status: str):
+        """Save project settings (resolution, SageAttention)."""
+        project = self.project_manager.get_active_project(refresh=True)
+
+        # Check if resolution_key is valid (extract values from tuples)
+        valid_keys = [value for _, value in self._resolution_choices()]
+        if resolution_key not in valid_keys:
+            return (
+                self._project_summary(project),
+                append_status(current_status, "❌ Invalid resolution."),
+            )
+
+        self.config.set("global_resolution", resolution_key)
+        self.config.set("use_sage_attention", use_sage)
+        self.config.save()
+
+        res_label = self._resolution_label(resolution_key)
+        sage_label = "activated" if use_sage else "deactivated"
+        return (
+            self._project_summary(project),
+            append_status(current_status, f"✅ Settings saved: {res_label}, SageAttention {sage_label}"),
+        )
+
+    def _show_delete_confirm(self):
+        """Show delete confirmation dialog for active project."""
+        project = self.project_manager.get_active_project(refresh=True)
+        if not project:
+            return (
+                "### ⚠️ No active project",
+                gr.update(visible=False),
+            )
+
+        project_name = project.get("name", project.get("slug", "?"))
+        slug = project.get("slug", "?")
+
+        confirm_text = f"""### ⚠️ Really delete active project?
+
+**Project:** {project_name} (`{slug}`)
+
+**Warning:** All project files (keyframes, videos, etc.) will be permanently deleted!
+"""
+        return confirm_text, gr.update(visible=True)
+
+    def _delete_project(self, current_status: str):
+        """Delete the active project after confirmation."""
+        project = self.project_manager.get_active_project(refresh=True)
+        if not project:
+            return (
+                self._project_summary(None),
+                gr.update(choices=self._project_choices(), value=None),
+                gr.update(interactive=False),  # load_btn
+                gr.update(interactive=False),  # delete_btn
+                gr.update(interactive=False),  # save_btn
+                gr.update(visible=False),  # delete_confirm_group
+                gr.update(visible=True),  # no_project_hint
+                append_status(current_status, "❌ No active project."),
+            )
+
+        slug = project.get("slug")
+        project_name = project.get("name", slug)
+
+        success = self.project_manager.delete_project(slug)
+
+        if success:
+            choices = self._project_choices()
+            has_projects = len(choices) > 0
+            new_project = self.project_manager.get_active_project(refresh=True)
+
+            return (
+                self._project_summary(new_project),
+                gr.update(choices=choices, value=new_project["slug"] if new_project else None),
+                gr.update(interactive=has_projects),  # load_btn
+                gr.update(interactive=new_project is not None),  # delete_btn
+                gr.update(interactive=new_project is not None),  # save_btn
+                gr.update(visible=False),  # delete_confirm_group
+                gr.update(visible=not has_projects),  # no_project_hint
+                append_status(current_status, f"✅ Project deleted: {project_name}"),
+            )
+        else:
+            return (
+                self._project_summary(project),
+                gr.update(value=slug),
+                gr.update(),  # load_btn
+                gr.update(),  # delete_btn
+                gr.update(),  # save_btn
+                gr.update(visible=False),  # delete_confirm_group
+                gr.update(visible=False),  # no_project_hint
+                append_status(current_status, f"❌ Could not delete project: {project_name}"),
+            )
+
     # -----------------------------
-    # Helper formatting
+    # Helper methods
     # -----------------------------
     def _project_choices(self) -> List[str]:
         return [entry["slug"] for entry in self.project_manager.list_projects()]
 
-    def _storyboard_choices(self) -> List[str]:
-        output_base = self._derive_output_base()
-        dirs: List[str] = []
-        if self.config.config_dir and os.path.isdir(self.config.config_dir):
-            dirs.append(self.config.config_dir)
-        project = self.project_manager.get_active_project(refresh=True)
-        if project:
-            for candidate in (project.get("path"), os.path.join(project.get("path"), "storyboards")):
-                if candidate and os.path.isdir(candidate):
-                    dirs.append(candidate)
-        choices: List[str] = []
-        seen = set()
-        for directory in dirs:
-            for filename in sorted(os.listdir(directory)):
-                if not filename.endswith(".json"):
-                    continue
-                if "storyboard" not in filename.lower():
-                    continue
-                full = os.path.join(directory, filename)
-                if full in seen:
-                    continue
-                label = self._short_display_path(full, output_base)
-                choices.append((label, full))
-                seen.add(full)
-        return choices
+    def _resolution_choices(self) -> List[tuple]:
+        """Return resolution choices as (label, value) tuples for Gradio dropdown.
 
-    def _resolution_choices(self) -> List[str]:
+        Wan 2.2 only supports 480p, 720p and 1080p (16:9 or 9:16).
+        LTX-Video supports flexible resolutions (divisible by 32).
+        Square resolutions (512, 1024) are for SDXL/LTX use cases.
+        """
         return [
-            "1080p_landscape",
-            "1080p_portrait",
-            "720p_landscape",
-            "720p_portrait",
-            "540p_landscape",
-            "540p_portrait",
+            # Wan 2.2 compatible (16:9 / 9:16 only)
+            ("1280×720 – Landscape (16:9) [Recommended]", "720p_landscape"),
+            ("720×1280 – Portrait (9:16)", "720p_portrait"),
+            ("832×480 – Landscape (16:9)", "480p_landscape"),
+            ("480×832 – Portrait (9:16)", "480p_portrait"),
+            ("1920×1080 – Landscape (16:9) [High VRAM]", "1080p_landscape"),
+            ("1080×1920 – Portrait (9:16) [High VRAM]", "1080p_portrait"),
+            # LTX-Video / SDXL compatible (flexible)
+            ("768×512 – Landscape (3:2) [LTX Low VRAM]", "ltx_768x512"),
+            ("512×768 – Portrait (2:3) [LTX Low VRAM]", "ltx_512x768"),
+            ("512×512 – Square (1:1) [SDXL/LTX]", "512_square"),
+            ("1024×1024 – Square (1:1) [SDXL Native]", "1024_square"),
         ]
 
-    def _project_overview(self, project: Optional[Dict[str, str]]) -> str:
-        if not project:
-            return "**Kein aktives Projekt ausgewählt.**"
-        lines = [
-            f"**Projekt:** {project.get('name')} (`{project.get('slug')}`)",
-            f"- Pfad: `{project.get('path')}`",
-            f"- Erstellt: {project.get('created_at', '-')}",
-            f"- Zuletzt geöffnet: {project.get('last_opened', '-')}",
-        ]
-        return "\n".join(lines)
-
-    def _project_json(self, project: Optional[Dict[str, str]]) -> str:
-        if not project:
-            return "{}"
-        data = {k: v for k, v in project.items() if k not in {"path"}}
-        return json.dumps(data, indent=2)
-
-    def _comfy_root_info(self) -> str:
-        self.config.refresh()
-        comfy_root = self.config.get_comfy_root()
-        output_path = os.path.join(comfy_root, "output")
-        return (
-            f"**ComfyUI Output Basis:** `{output_path}`  \n"
-            "Alle Projektordner werden hier erstellt. Passe den Pfad im ⚙️ Settings-Tab an, falls nötig."
-        )
-
-    def _globals_status(self) -> str:
-        self.config.refresh()
-        storyboard = self.config.get_current_storyboard() or "Kein Storyboard gesetzt."
-        res_key = self.config.get_resolution_preset()
-        res_map = {
-            "1080p_landscape": "1920x1080 (16:9 Quer)",
-            "1080p_portrait": "1080x1920 (9:16 Hoch)",
-            "720p_landscape": "1280x720 (16:9 Quer)",
-            "720p_portrait": "720x1280 (9:16 Hoch)",
-            "540p_landscape": "960x540 (16:9 Quer)",
-            "540p_portrait": "540x960 (9:16 Hoch)",
+    def _resolution_label(self, key: str) -> str:
+        """Get display label for resolution key."""
+        labels = {
+            "720p_landscape": "1280×720 (Landscape)",
+            "720p_portrait": "720×1280 (Portrait)",
+            "480p_landscape": "832×480 (Landscape)",
+            "480p_portrait": "480×832 (Portrait)",
+            "1080p_landscape": "1920×1080 (Landscape)",
+            "1080p_portrait": "1080×1920 (Portrait)",
+            "512_square": "512×512 (Square)",
+            "1024_square": "1024×1024 (Square)",
+            # LTX-Video presets
+            "ltx_768x512": "768×512 (LTX Low VRAM)",
+            "ltx_512x768": "512×768 (LTX Portrait)",
+            # Legacy support
+            "540p_landscape": "960×540 (Landscape) [Not recommended]",
+            "540p_portrait": "540×960 (Portrait) [Not recommended]",
+            "test_square": "512×512 (Test)",
         }
-        res_label = res_map.get(res_key, res_key)
-        return f"**Storyboard:** `{storyboard}`  \n**Auflösung:** {res_label}"
+        return labels.get(key, key)
 
-    def _save_storyboard(self, storyboard: Optional[str]):
-        if not storyboard or storyboard.startswith("No storyboards"):
-            return "**❌ Fehler:** Bitte ein Storyboard auswählen."
-        self.config.set("current_storyboard", storyboard)
-        return self._globals_status()
+    def _project_summary(self, project: Optional[Dict[str, str]]) -> str:
+        """Formatted project summary for display."""
+        if not project:
+            return (
+                "**No project selected**\n\n"
+                "Create a new project or load an existing one."
+            )
 
-    def _save_resolution(self, resolution_key: str):
-        if resolution_key not in self._resolution_choices():
-            return "**❌ Fehler:** Ungültige Auflösung.", gr.update(value=self.config.get_resolution_preset())
-        self.config.set("global_resolution", resolution_key)
-        return self._globals_status(), gr.update(value=resolution_key)
+        name = project.get("name", "-")
+        slug = project.get("slug", "-")
+        path = project.get("path", "-")
+        created = project.get("created_at", "-")
+        if created and "T" in created:
+            created = created.split("T")[0]
+        last_opened = project.get("last_opened", "-")
+        if last_opened and "T" in last_opened:
+            last_opened = last_opened.split("T")[0]
 
-    # -----------------------------
-    # New UI helpers
-    # -----------------------------
-    def _status_bar(self, project: Optional[Dict[str, str]]) -> str:
-        """Compact status line for current context."""
+        # Path status check
+        path_exists = path and os.path.isdir(path)
+        status_badge = "✅" if path_exists else "⚠️"
+
+        # Resolution from config
         self.config.refresh()
-        parts: List[str] = []
-
-        # Projekt
-        if project:
-            path = project.get("path") or ""
-            badge = "✅" if path and os.path.isdir(path) else "⚠️"
-            parts.append(f"Aktives Projekt: {badge} {project.get('name')} (`{project.get('slug')}`)")
-        else:
-            parts.append("Aktives Projekt: ⚠️ keines gewählt")
-
-        # Storyboard - validate path and try to resolve if invalid
-        storyboard = self.config.get_current_storyboard()
-        if storyboard:
-            resolved_path = self._resolve_storyboard_path(storyboard)
-            if resolved_path and os.path.exists(resolved_path):
-                sb_badge = "✅"
-                parts.append(f"Storyboard: {sb_badge} `{os.path.basename(resolved_path)}`")
-            else:
-                sb_badge = "❌"
-                parts.append(f"Storyboard: {sb_badge} `{os.path.basename(storyboard)}` **NICHT GEFUNDEN**")
-        else:
-            parts.append("Storyboard: ⚠️ keines gesetzt")
-
-        # Auflösung
         res_key = self.config.get_resolution_preset()
-        res_label = {
-            "1080p_landscape": "1920x1080",
-            "1080p_portrait": "1080x1920",
-            "720p_landscape": "1280x720",
-            "720p_portrait": "720x1280",
-            "540p_landscape": "960x540",
-            "540p_portrait": "540x960",
-        }.get(res_key, res_key)
-        parts.append(f"Auflösung: {res_label}")
+        res_label = self._resolution_label(res_key)
 
-        return " | ".join(parts)
-
-    def _apply_defaults(self, storyboard: Optional[str], resolution_key: str, current_status: str):
-        """Apply storyboard + resolution with one CTA."""
-        messages: List[str] = []
-
-        sb_status = self._save_storyboard(storyboard)
-        sb_error = isinstance(sb_status, str) and sb_status.startswith("**❌")
-        if sb_error:
-            messages.append("Storyboard ungültig oder fehlt.")
-        else:
-            messages.append(f"Storyboard gesetzt: {os.path.basename(storyboard) if storyboard else 'keines ausgewählt'}")
-
-        res_status, res_dropdown = self._save_resolution(resolution_key)
-        res_error = isinstance(res_status, str) and res_status.startswith("**❌")
-        if res_error:
-            messages.append("Auflösung ungültig.")
-        else:
-            messages.append(f"Auflösung gesetzt: {resolution_key}")
-
-        project = self.project_manager.get_active_project(refresh=True)
-
-        globals_md = self._globals_status() if not sb_error and not res_error else (sb_status if sb_error else res_status)
-        status_text = "\n".join(msg for msg in messages if msg)
-        return (
-            globals_md,
-            res_dropdown,
-            self._status_bar(project),
-            self._append_status(current_status, status_text),
-        )
-
-    def _refresh_storyboards(self, current_status: str):
-        choices = self._storyboard_choices()
-        updated = gr.update(choices=choices, value=self.config.get_current_storyboard())
-        msg = f"Storyboards neu geladen: {len(choices)} gefunden"
-        return updated, self._append_status(current_status, msg)
-
-    def _append_status(self, current: str, message: str) -> str:
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        lines = [line for line in (current or "").splitlines() if line.strip()]
-        lines.append(f"[{timestamp}] {message}")
-        if len(lines) > 100:
-            lines = lines[-100:]
-        return "\n".join(lines)
-
-    def _init_status(self) -> str:
-        return "[--:--:--] Bereit."
-
-    def _derive_output_base(self) -> str:
-        comfy_root = self.config.get_comfy_root()
-        if not comfy_root:
-            return ""
-        return os.path.join(comfy_root, "output")
-
-    def _short_display_path(self, abs_path: str, output_base: str) -> str:
-        if not abs_path:
-            return abs_path
-        marker = "/output/"
-        if marker in abs_path:
-            return abs_path.split(marker, 1)[-1]
-        if output_base and abs_path.startswith(output_base):
-            return abs_path[len(output_base):].lstrip(os.sep)
-        return os.path.basename(abs_path)
+        return f"""| | |
+|---|---|
+| **Project** | {status_badge} **{name}** |
+| **Resolution** | {res_label} |
+| **Path** | `{path}` |
+| **Created** | {created} |
+| **Last opened** | {last_opened} |
+"""
 
     def _is_comfy_path_valid(self) -> bool:
         path = self.config.get_comfy_root()
         return bool(path) and os.path.exists(path)
-
-    def _resolve_storyboard_path(self, storyboard_path: str) -> Optional[str]:
-        """Try to resolve storyboard path, checking multiple locations."""
-        if not storyboard_path:
-            return None
-
-        # If absolute path exists, use it
-        if os.path.isabs(storyboard_path) and os.path.exists(storyboard_path):
-            return storyboard_path
-
-        # Extract filename for relative resolution
-        filename = os.path.basename(storyboard_path)
-
-        # Try config dir
-        if self.config.config_dir:
-            candidate = os.path.join(self.config.config_dir, filename)
-            if os.path.exists(candidate):
-                return candidate
-
-        # Try active project path
-        project = self.project_manager.get_active_project(refresh=False)
-        if project and project.get("path"):
-            project_path = project["path"]
-            for subdir in ("", "storyboards"):
-                candidate = os.path.join(project_path, subdir, filename) if subdir else os.path.join(project_path, filename)
-                if os.path.exists(candidate):
-                    return candidate
-
-        # If absolute path was given but doesn't exist, return None
-        if os.path.isabs(storyboard_path):
-            return None
-
-        return None
-
-    def _reevaluate_lock_state(self, current_status: str):
-        valid = self._is_comfy_path_valid()
-        warning_text = ""
-        if not valid:
-            warning_text = "**⚠️ ComfyUI Installationspfad fehlt/ist ungültig. Bitte zuerst im Settings-Tab setzen.**"
-        warning = gr.update(value=warning_text, visible=not valid)
-        inter = gr.update(interactive=valid)
-        status = self._append_status(current_status, "Pfad geprüft: gültig" if valid else "Pfad ungültig – bitte Settings prüfen.")
-        project = self.project_manager.get_active_project(refresh=True)
-
-        return (
-            warning,
-            inter,
-            inter,
-            inter,
-            inter,
-            inter,
-            inter,
-            inter,
-            inter,
-            inter,
-            self._status_bar(project),
-            status,
-        )
-
 
 __all__ = ["ProjectAddon"]

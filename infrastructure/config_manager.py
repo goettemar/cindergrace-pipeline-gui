@@ -1,91 +1,110 @@
-"""Configuration file management"""
-import json
+"""Configuration management via SQLite SettingsStore.
+
+This module provides backwards-compatible access to settings
+while storing all data securely in SQLite with encryption for
+sensitive values like API keys.
+"""
 import os
-import platform
 from typing import Any, Dict, Optional
 
-# Platform-specific file locking
-_HAS_FCNTL = False
-if platform.system() != "Windows":
-    try:
-        import fcntl
-        _HAS_FCNTL = True
-    except ImportError:
-        pass
+from infrastructure.settings_store import get_settings_store
 
 
 class ConfigManager:
-    """Manage GUI settings and pipeline configuration"""
+    """Manage GUI settings and pipeline configuration.
 
-    def __init__(self, config_path: str = "config/settings.json"):
-        """
-        Initialize config manager
+    Uses SQLite-based SettingsStore for persistent storage.
+    Sensitive values (API keys) are automatically encrypted.
+    """
 
-        Args:
-            config_path: Path to settings JSON file
-        """
-        self.config_path = config_path
-        self.config_dir = os.path.dirname(config_path) if config_path != "config/settings.json" else "config"
-        self.config = self.load()
-
-    def load(self) -> Dict[str, Any]:
-        """
-        Load config from JSON file
-
-        Returns:
-            Configuration dictionary
-        """
-        if os.path.exists(self.config_path):
-            try:
-                with open(self.config_path, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Warning: Failed to load config from {self.config_path}: {e}")
-                return self._default_config()
-        else:
-            print(f"Config file not found, using defaults: {self.config_path}")
-            return self._default_config()
-
-    def refresh(self) -> Dict[str, Any]:
-        """Reload configuration from disk"""
-        self.config = self.load()
-        return self.config
-
-    def save(self, config: Dict[str, Any] = None):
-        """Save config to JSON file with file-locking to prevent race conditions.
-
-        On Linux/Mac, uses fcntl for exclusive locks.
-        On Windows, relies on atomic file operations (no locking available).
+    def __init__(self, config_path: str = None):
+        """Initialize config manager.
 
         Args:
-            config: Configuration dict to save (uses self.config if None)
+            config_path: Deprecated, kept for backwards compatibility.
+                        All settings are stored in SQLite.
         """
-        if config is not None:
-            self.config = config
+        self._store = get_settings_store()
+        # For backwards compatibility with code that checks config_dir
+        self.config_dir = "config"
+        # Deprecated: config_path no longer used
+        self.config_path = config_path or "config/settings.json"
 
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
+        # Migrate from JSON if needed (one-time)
+        self._migrate_from_json()
+
+    def _migrate_from_json(self) -> None:
+        """Migrate settings from old JSON config if it exists."""
+        json_path = "config/settings.json"
+        if not os.path.exists(json_path):
+            return
 
         try:
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                # Acquire exclusive lock (Linux/Mac only)
-                if _HAS_FCNTL:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            import json
+            with open(json_path, 'r') as f:
+                old_config = json.load(f)
 
-                try:
-                    json.dump(self.config, f, indent=2, ensure_ascii=False)
-                finally:
-                    # Release lock (Linux/Mac only)
-                    if _HAS_FCNTL:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            # Check if already migrated
+            if self._store.get("_migrated_from_json"):
+                return
 
-            print(f"✓ Config saved to {self.config_path}")
+            # Migrate each setting
+            for key, value in old_config.items():
+                if key.startswith('_'):
+                    continue
+
+                # Handle special types
+                if isinstance(value, (dict, list)):
+                    self._store.set_json(key, value)
+                elif isinstance(value, bool):
+                    self._store.set(key, "true" if value else "false")
+                elif value is not None:
+                    self._store.set(key, str(value))
+
+            # Mark as migrated
+            self._store.set("_migrated_from_json", "true")
+            print(f"✓ Migrated settings from {json_path} to SQLite")
+
+            # Rename old config to backup
+            backup_path = json_path + ".backup"
+            os.rename(json_path, backup_path)
+            print(f"✓ Old config backed up to {backup_path}")
+
         except Exception as e:
-            print(f"✗ Failed to save config: {e}")
+            print(f"Warning: Failed to migrate from JSON: {e}")
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        """Get all settings as dictionary for backwards compatibility."""
+        return self._store.get_all()
+
+    def load(self) -> Dict[str, Any]:
+        """Load config (returns current settings)."""
+        return self._store.get_all()
+
+    def refresh(self) -> Dict[str, Any]:
+        """Reload configuration (no-op for SQLite, always fresh)."""
+        return self._store.get_all()
+
+    def save(self, config: Dict[str, Any] = None):
+        """Save config (applies all values from dict).
+
+        Args:
+            config: Configuration dict to save (optional)
+        """
+        if config is not None:
+            for key, value in config.items():
+                if key.startswith('_'):
+                    continue
+                if isinstance(value, (dict, list)):
+                    self._store.set_json(key, value)
+                elif isinstance(value, bool):
+                    self._store.set(key, "true" if value else "false")
+                elif value is not None:
+                    self._store.set(key, str(value))
 
     def get(self, key: str, default=None) -> Any:
-        """
-        Get config value with default fallback
+        """Get config value with default fallback.
 
         Args:
             key: Configuration key
@@ -94,101 +113,69 @@ class ConfigManager:
         Returns:
             Configuration value or default
         """
-        return self.config.get(key, default)
+        value = self._store.get(key)
+        if value is None:
+            return default
+        return value
 
     def set(self, key: str, value: Any):
-        """
-        Set config value and auto-save
+        """Set config value and auto-save.
 
         Args:
             key: Configuration key
             value: Value to set
         """
-        self.config[key] = value
-        self.save()
+        if isinstance(value, (dict, list)):
+            self._store.set_json(key, value)
+        elif isinstance(value, bool):
+            self._store.set(key, "true" if value else "false")
+        elif value is not None:
+            self._store.set(key, str(value))
 
-    def _default_config(self) -> Dict[str, Any]:
-        """
-        Get default configuration
+    def _get_bool(self, key: str, default: bool = False) -> bool:
+        """Get boolean setting."""
+        value = self._store.get(key)
+        if value is None:
+            return default
+        return value.lower() == "true"
 
-        Returns:
-            Default config dictionary
-        """
-        return {
-            "comfy_url": "http://127.0.0.1:8188",
-            "comfy_root": os.path.expanduser("~/comfyui"),
-            "workflow_dir": "config/workflow_templates",
-            "output_dir": "output",
-            "current_storyboard": None,
-            "global_resolution": "1080p_landscape",
-            "log_level": "INFO",
-            "theme": "default",
-            "auto_save_results": True,
-            "max_concurrent_jobs": 1,
-            # Multi-backend support for local/cloud ComfyUI
-            "active_backend": "local",
-            "backends": {
-                "local": {
-                    "name": "Lokal",
-                    "url": "http://127.0.0.1:8188",
-                    "comfy_root": os.path.expanduser("~/comfyui"),
-                    "type": "local"
-                }
-            }
-        }
+    def _get_int(self, key: str, default: int = 0) -> int:
+        """Get integer setting."""
+        value = self._store.get(key)
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except ValueError:
+            return default
 
-    # Convenience methods
+    # === Convenience methods ===
+
     def get_comfy_url(self, refresh: bool = True) -> str:
-        """Get ComfyUI server URL from active backend.
-
-        Args:
-            refresh: If True, reload config from disk first (default: True)
-        """
-        if refresh:
-            self.refresh()
+        """Get ComfyUI server URL from active backend."""
         backend = self.get_active_backend()
         return backend.get("url", "http://127.0.0.1:8188")
 
     def get_workflow_dir(self) -> str:
-        """Get workflow templates directory"""
-        return self.get("workflow_dir", "config/workflow_templates")
+        """Get workflow templates directory."""
+        return self._store.get("workflow_dir") or "config/workflow_templates"
 
     def get_comfy_root(self, refresh: bool = True) -> str:
-        """Get ComfyUI installation root from active backend (for model discovery).
-
-        Args:
-            refresh: If True, reload config from disk first (default: True)
-        """
-        if refresh:
-            self.refresh()
+        """Get ComfyUI installation root from active backend."""
         backend = self.get_active_backend()
-        root = backend.get("comfy_root") or self.get("comfy_root", os.path.expanduser("~/comfyui"))
+        root = backend.get("comfy_root") or self._store.get_comfy_root()
         return os.path.expanduser(root)
 
     def get_output_dir(self) -> str:
-        """Get output directory"""
-        return self.get("output_dir", "output")
+        """Get output directory."""
+        return self._store.get("output_dir") or "output"
+
+    def use_sage_attention(self) -> bool:
+        """Check if SageAttention is enabled for faster inference."""
+        return self._store.use_sage_attention()
 
     def get_current_storyboard(self) -> Optional[str]:
-        """Return storyboard path from active project (SQLite).
-
-        Falls back to JSON config for backwards compatibility.
-        Automatically migrates JSON data to SQLite when found.
-        """
-        json_storyboard = self.get("current_storyboard")
-        if json_storyboard:
-            # Best-effort migration to SQLite
-            try:
-                from infrastructure.project_store import ProjectStore
-                project_store = ProjectStore(self)
-                project = project_store.get_active_project()
-                if project and project.get("slug"):
-                    project_store.set_project_storyboard(project, json_storyboard, set_as_default=True)
-            except Exception:
-                pass
-            return json_storyboard
-
-        # Lazy import to avoid circular dependency
+        """Return storyboard path from active project (SQLite)."""
         try:
             from infrastructure.project_store import ProjectStore
             project_store = ProjectStore(self)
@@ -197,93 +184,77 @@ class ConfigManager:
                 return storyboard
         except Exception:
             pass
-
         return None
 
     def get_resolution_preset(self) -> str:
         """Return selected resolution preset key."""
-        return self.get("global_resolution", "1080p_landscape")
+        return self._store.get_resolution_preset()
 
     def get_resolution_tuple(self) -> tuple[int, int]:
-        """Map preset key to (width, height).
-
-        Wan 2.2 unterstützt nur 480p, 720p und 1080p.
-        """
+        """Map preset key to (width, height)."""
         presets = {
             "720p_landscape": (1280, 720),
             "720p_portrait": (720, 1280),
-            "480p_landscape": (854, 480),
-            "480p_portrait": (480, 854),
+            "480p_landscape": (832, 480),
+            "480p_portrait": (480, 832),
             "1080p_landscape": (1920, 1080),
             "1080p_portrait": (1080, 1920),
-            # Legacy (nicht empfohlen für Wan 2.2)
             "540p_landscape": (960, 540),
             "540p_portrait": (540, 960),
+            "512_square": (512, 512),
+            "1024_square": (1024, 1024),
+            # LTX-Video presets (flexible resolutions)
+            "ltx_768x512": (768, 512),
+            "ltx_512x768": (512, 768),
         }
         return presets.get(self.get_resolution_preset(), (1024, 576))
 
     def get_log_level(self) -> str:
-        """Get logging level"""
-        return self.get("log_level", "INFO")
+        """Get logging level."""
+        return self._store.get("log_level") or "INFO"
 
     def get_video_initial_wait(self) -> int:
-        """Get initial wait time in seconds before checking for video files (default: 60)"""
-        return int(self.get("video_initial_wait", 60))
+        """Get initial wait time in seconds before checking for video files."""
+        return self._get_int("video_initial_wait", 60)
 
     def get_video_retry_delay(self) -> int:
-        """Get delay between retry checks in seconds (default: 30)"""
-        return int(self.get("video_retry_delay", 30))
+        """Get delay between retry checks in seconds."""
+        return self._get_int("video_retry_delay", 30)
 
     def get_video_max_retries(self) -> int:
-        """Get maximum number of retries for video file detection (default: 20)"""
-        return int(self.get("video_max_retries", 20))
+        """Get maximum number of retries for video file detection."""
+        return self._get_int("video_max_retries", 20)
 
-    # Setup Wizard methods
+    # === Setup Wizard methods ===
+
     def is_first_run(self) -> bool:
-        """Check if this is the first run (setup not completed).
-
-        Returns:
-            True if setup wizard should be shown, False otherwise
-        """
-        # Schneller Check: Wenn setup_completed True ist, kein First-Run
-        if self.get("setup_completed", False):
+        """Check if this is the first run (setup not completed)."""
+        if self._get_bool("setup_completed", False):
             return False
 
-        # Check ob comfy_root gesetzt und als Verzeichnis existiert
-        comfy_root = self.get("comfy_root", "")
+        comfy_root = self._store.get("comfy_root") or ""
         if not comfy_root:
             return True
 
-        # Pfad expandieren und prüfen
         expanded_path = os.path.expanduser(comfy_root)
         if os.path.isdir(expanded_path):
-            # ComfyUI-Pfad existiert - kein First-Run Banner nötig
             return False
 
         return True
 
     def mark_setup_completed(self) -> None:
         """Mark the setup wizard as completed."""
-        self.set("setup_completed", True)
+        self._store.set("setup_completed", "true")
 
-    # Backend management methods
+    # === Backend management methods ===
+
     def get_backends(self) -> Dict[str, Dict[str, Any]]:
         """Get all configured backends."""
-        backends = self.get("backends")
-        if backends:
-            return backends
-        return {
-            "local": {
-                "name": "Lokal",
-                "url": self.get("comfy_url", "http://127.0.0.1:8188"),
-                "comfy_root": self.get("comfy_root", os.path.expanduser("~/comfyui")),
-                "type": "local",
-            }
-        }
+        return self._store.get_backends()
 
     def get_active_backend_id(self) -> str:
         """Get the ID of the currently active backend."""
-        return self.get("active_backend", "local")
+        return self._store.get_active_backend_id()
 
     def get_active_backend(self) -> Dict[str, Any]:
         """Get the currently active backend configuration."""
@@ -304,26 +275,12 @@ class ConfigManager:
         if backend_id not in backends:
             return False
 
-        backend = backends[backend_id]
-        self.config["active_backend"] = backend_id
-        # Update legacy fields for compatibility
-        self.config["comfy_url"] = backend.get("url", "http://127.0.0.1:8188")
-        if backend.get("type") == "local":
-            self.config["comfy_root"] = backend.get("comfy_root", os.path.expanduser("~/comfyui"))
-        self.save()
+        self._store.set_active_backend_id(backend_id)
         return True
 
     def add_backend(self, backend_id: str, name: str, url: str,
                     backend_type: str = "remote", comfy_root: str = "") -> None:
-        """Add a new backend configuration.
-
-        Args:
-            backend_id: Unique identifier for the backend
-            name: Display name
-            url: ComfyUI URL (local or cloudflare tunnel)
-            backend_type: "local" or "remote"
-            comfy_root: ComfyUI path (only for local backends)
-        """
+        """Add a new backend configuration."""
         backends = self.get_backends()
         backends[backend_id] = {
             "name": name,
@@ -331,47 +288,27 @@ class ConfigManager:
             "type": backend_type,
             "comfy_root": comfy_root if backend_type == "local" else ""
         }
-        self.config["backends"] = backends
-        self.save()
+        self._store.set_backends(backends)
 
     def remove_backend(self, backend_id: str) -> bool:
-        """Remove a backend configuration.
-
-        Args:
-            backend_id: The backend to remove
-
-        Returns:
-            True if removed, False if not found or is the only backend
-        """
+        """Remove a backend configuration."""
         if backend_id == "local":
-            return False  # Cannot remove default local backend
+            return False
 
         backends = self.get_backends()
         if backend_id not in backends or len(backends) <= 1:
             return False
 
-        # If removing active backend, switch to local
         if self.get_active_backend_id() == backend_id:
             self.set_active_backend("local")
 
         del backends[backend_id]
-        self.config["backends"] = backends
-        self.save()
+        self._store.set_backends(backends)
         return True
 
     def update_backend(self, backend_id: str, name: str = None, url: str = None,
                        comfy_root: str = None) -> bool:
-        """Update an existing backend configuration.
-
-        Args:
-            backend_id: The backend to update
-            name: New display name (optional)
-            url: New URL (optional)
-            comfy_root: New comfy_root path (optional, local only)
-
-        Returns:
-            True if updated, False if not found
-        """
+        """Update an existing backend configuration."""
         backends = self.get_backends()
         if backend_id not in backends:
             return False
@@ -383,19 +320,63 @@ class ConfigManager:
         if comfy_root is not None and backends[backend_id].get("type") == "local":
             backends[backend_id]["comfy_root"] = comfy_root
 
-        self.config["backends"] = backends
-
-        # Update legacy fields if this is the active backend
-        if self.get_active_backend_id() == backend_id:
-            if url is not None:
-                self.config["comfy_url"] = url
-            if comfy_root is not None and backends[backend_id].get("type") == "local":
-                self.config["comfy_root"] = comfy_root
-
-        self.save()
+        self._store.set_backends(backends)
         return True
 
     def is_remote_backend(self) -> bool:
         """Check if the current backend is remote (Colab/Cloud)."""
         backend = self.get_active_backend()
         return backend.get("type", "local") == "remote"
+
+    # === API Keys (encrypted via SettingsStore) ===
+
+    def get_civitai_api_key(self) -> str:
+        """Get Civitai API key for model downloads (decrypted)."""
+        return self._store.get_civitai_api_key()
+
+    def set_civitai_api_key(self, key: str) -> None:
+        """Set Civitai API key (will be encrypted)."""
+        self._store.set_civitai_api_key(key)
+
+    def get_huggingface_token(self) -> str:
+        """Get Huggingface token for model downloads (decrypted)."""
+        return self._store.get_huggingface_token()
+
+    def set_huggingface_token(self, token: str) -> None:
+        """Set Huggingface token (will be encrypted)."""
+        self._store.set_huggingface_token(token)
+
+    def get_google_tts_api_key(self) -> str:
+        """Get Google TTS API key (decrypted)."""
+        return self._store.get_google_tts_api_key()
+
+    def set_google_tts_api_key(self, key: str) -> None:
+        """Set Google TTS API key (will be encrypted)."""
+        self._store.set_google_tts_api_key(key)
+
+    # === OpenRouter API ===
+
+    def get_openrouter_api_key(self) -> str:
+        """Get OpenRouter API key for LLM access (decrypted)."""
+        return self._store.get_openrouter_api_key()
+
+    def set_openrouter_api_key(self, key: str) -> None:
+        """Set OpenRouter API key (will be encrypted)."""
+        self._store.set_openrouter_api_key(key)
+
+    def get_openrouter_models(self) -> list:
+        """Get configured OpenRouter models (up to 3)."""
+        return self._store.get_openrouter_models()
+
+    def set_openrouter_models(self, models: list) -> None:
+        """Set OpenRouter models (up to 3)."""
+        self._store.set_openrouter_models(models)
+
+    def get_max_parallel_downloads(self) -> int:
+        """Get maximum parallel downloads (1-5)."""
+        value = self._get_int("max_parallel_downloads", 2)
+        return max(1, min(5, value))
+
+    def set_max_parallel_downloads(self, count: int) -> None:
+        """Set maximum parallel downloads."""
+        self._store.set("max_parallel_downloads", str(max(1, min(5, count))))

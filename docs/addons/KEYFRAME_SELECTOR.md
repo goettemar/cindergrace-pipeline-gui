@@ -1,10 +1,11 @@
-# ✅ Keyframe Selector
+# ✅ Select (Keyframe Selector)
 
-**Tab Name:** ✅ Keyframe Selector
+**Tab Name:** ✅ Select
 **File:** `addons/keyframe_selector.py`
-**Lines:** ~300
+**Lines:** ~330
 **Service:** SelectionService
 **State:** Stateful (selections in gr.State)
+**Shared Helpers:** `storyboard_section`, `storyboard_status_md`, `load_storyboard_from_config`, `selection_formatter` (Summary/Preview)
 
 ---
 
@@ -13,7 +14,7 @@
 | Property | Value |
 |----------|-------|
 | **Purpose** | Select best keyframe variant per shot for video generation |
-| **Main Files** | `addons/keyframe_selector.py`, `services/selection/selection_service.py` |
+| **Main Files** | `addons/keyframe_selector.py`, `services/selection_service.py` |
 | **Dependencies** | SelectionService, ProjectStore, StoryboardService, ConfigManager |
 | **State Management** | Selections in gr.State, exported to `<project>/selected/selected_keyframes.json` |
 | **Output Location** | `<project>/selected/*.png` + `selected_keyframes.json` |
@@ -24,7 +25,7 @@
 
 The Keyframe Selector enables:
 
-1. **Load Storyboard** - Load storyboard to get shot list
+1. **Load Storyboard** - Load storyboard to get shot list (shared loader/helper)
 2. **Collect Variants** - Find all keyframe variants per shot by `filename_base`
 3. **Display Gallery** - Show variants grouped by shot with radio selection
 4. **Select Best Variant** - User selects one variant per shot
@@ -69,9 +70,9 @@ Load Storyboard
 ```python
 # Setup Section
 project_status = gr.Markdown()  # Active project display
-storyboard_dropdown = gr.Dropdown()  # List of storyboards
-refresh_storyboard_btn = gr.Button("↻")
-load_storyboard_btn = gr.Button("📖 Load Storyboard")
+storyboard_section = create_storyboard_section(...)  # Accordion + reload
+storyboard_info_md = storyboard_section.info_md
+load_storyboard_btn = storyboard_section.reload_btn
 
 # Selection Summary
 selection_summary = gr.Markdown()  # "Selected 3/5 shots"
@@ -404,7 +405,7 @@ export_btn.click(
 
 **Manual Testing Checklist:**
 1. Generate keyframes (5 shots, 3 variants each)
-2. Go to Keyframe Selector → Load storyboard
+2. Go to ✅ Select tab → Load storyboard
 3. Verify galleries show 3 variants per shot
 4. Select one variant per shot via radio buttons
 5. Verify selection summary updates: "Selected 5/5 shots"
@@ -413,7 +414,7 @@ export_btn.click(
    - `selected_keyframes.json` exists
    - 5 PNG files (one per shot)
 8. Open JSON → Verify structure matches specification
-9. Go to Video Generator → Verify selection appears in dropdown
+9. Go to 🎥 Video tab → Verify selection appears in dropdown
 
 ---
 
@@ -431,5 +432,5 @@ None currently. This addon is stable.
 
 ---
 
-**Last Updated:** December 13, 2025
-**Version:** v0.5.1
+**Last Updated:** December 21, 2025
+**Version:** v0.6.1

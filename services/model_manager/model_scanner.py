@@ -17,11 +17,13 @@ class ModelScanner:
         "loras": [".safetensors", ".pt", ".pth"],
         "vae": [".safetensors", ".pt", ".pth", ".ckpt"],
         "controlnet": [".safetensors", ".pth"],
-        "upscale_models": [".pth", ".pt"],
+        "upscale_models": [".pth", ".pt", ".safetensors"],
         "clip": [".safetensors", ".pt", ".pth"],
-        "unet": [".safetensors", ".pt", ".pth"],
+        "unet": [".safetensors", ".pt", ".pth", ".gguf"],
+        "diffusion_models": [".safetensors", ".pt", ".pth", ".gguf"],  # Wan, Flux, etc.
         "style_models": [".safetensors", ".ckpt"],
         "embeddings": [".pt", ".safetensors"],
+        "text_encoders": [".safetensors", ".pt", ".pth", ".gguf"],  # T5, CLIP text encoders
     }
 
     def __init__(self, comfyui_models_dir: str):

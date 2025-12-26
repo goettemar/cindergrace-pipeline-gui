@@ -1,6 +1,6 @@
-# 📖 Storyboard Editor
+# 📝 Editor (Storyboard Editor)
 
-**Tab Name:** 📖 Storyboard Editor
+**Tab Name:** 📝 Editor
 **File:** `addons/storyboard_editor.py`
 **Lines:** ~400 (estimated)
 **Service:** StoryboardEditorService (if implemented) or direct StoryboardService usage
