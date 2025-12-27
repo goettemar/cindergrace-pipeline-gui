@@ -16,6 +16,7 @@ from addons.base_addon import BaseAddon
 from addons.components import format_project_status
 from infrastructure.config_manager import ConfigManager
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 from services.character_trainer_service import (
     CharacterTrainerService,
     VIEW_PRESETS,
@@ -35,6 +36,7 @@ class DatasetGeneratorAddon(BaseAddon):
         )
         self.config = ConfigManager()
         self.char_service = CharacterTrainerService(self.config)
+        self._job_store = JobStatusStore()
 
     def get_tab_name(self) -> str:
         return "📸 Dataset"
@@ -140,6 +142,7 @@ class DatasetGeneratorAddon(BaseAddon):
                         "Check `logs/pipeline.log` for progress."
                     )
 
+                    job_status_md = gr.Markdown(self._get_job_status_md("dataset_generation"))
                     dataset_status = gr.Markdown("**Status:** Ready")
 
                 with gr.Group():
@@ -167,10 +170,10 @@ class DatasetGeneratorAddon(BaseAddon):
         # Event handlers
         def generate_dataset(name, image_path, workflow, steps, cfg, progress=gr.Progress()):
             if not name or not name.strip():
-                return "**Status:** ❌ Please enter a character name", [], ""
+                return "**Status:** ❌ Please enter a character name", [], "", self._get_job_status_md("dataset_generation")
 
             if not image_path or not os.path.exists(image_path):
-                return "**Status:** ❌ Please upload a base image", [], ""
+                return "**Status:** ❌ Please upload a base image", [], "", self._get_job_status_md("dataset_generation")
 
             # Set workflow before generation
             workflow_file = self._get_workflow_file(workflow)
@@ -181,6 +184,14 @@ class DatasetGeneratorAddon(BaseAddon):
                 progress(pct, desc=status)
 
             progress(0, desc="Starting Generation...")
+
+            self._job_store.set_status(
+                None,
+                "dataset_generation",
+                "running",
+                message="Dataset generation started",
+                metadata={"character": name.strip()},
+            )
 
             result = self.char_service.generate_training_set(
                 base_image_path=image_path,
@@ -209,9 +220,21 @@ class DatasetGeneratorAddon(BaseAddon):
                     f"📁 Dataset ready for LoRA training!"
                 )
 
-                return status, gallery_items, result.output_dir
+                self._job_store.set_status(
+                    None,
+                    "dataset_generation",
+                    "completed",
+                    message=f"Generated {result.successful_count}/15 views",
+                )
+                return status, gallery_items, result.output_dir, self._get_job_status_md("dataset_generation")
             else:
-                return f"**Status:** ❌ {result.error}", [], ""
+                self._job_store.set_status(
+                    None,
+                    "dataset_generation",
+                    "failed",
+                    message=result.error,
+                )
+                return f"**Status:** ❌ {result.error}", [], "", self._get_job_status_md("dataset_generation")
 
         def open_dataset_folder(path):
             if path and os.path.exists(path):
@@ -221,7 +244,7 @@ class DatasetGeneratorAddon(BaseAddon):
         generate_dataset_btn.click(
             fn=generate_dataset,
             inputs=[character_name, base_image, workflow_dropdown, steps_slider, cfg_slider],
-            outputs=[dataset_status, results_gallery, dataset_output_dir]
+            outputs=[dataset_status, results_gallery, dataset_output_dir, job_status_md]
         )
 
         open_dataset_btn.click(
@@ -255,6 +278,19 @@ class DatasetGeneratorAddon(BaseAddon):
             column_count=4,
             interactive=False,
             wrap=True
+        )
+
+    def _get_job_status_md(self, job_type: str) -> str:
+        """Return last job status for the given job type."""
+        status = self._job_store.get_status(None, job_type)
+        if not status:
+            return ""
+        updated = status.updated_at or "unknown time"
+        message = status.message or "No details"
+        return (
+            f"**Last job:** `{status.status}`\n\n"
+            f"{message}\n\n"
+            f"_Last updated: {updated}_"
         )
 
         gr.Markdown("""

@@ -10,6 +10,7 @@ from addons.components import format_project_status_extended, project_status_md
 from infrastructure.config_manager import ConfigManager
 from infrastructure.project_store import ProjectStore
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 from services.image_import_service import ImageImportService, ImportedImage
 from services.image_analyzer_service import ImageAnalyzerService
 
@@ -29,6 +30,7 @@ class ImageImporterAddon(BaseAddon):
         self.project_manager = ProjectStore(self.config)
         self.import_service = ImageImportService()
         self.analyzer_service = ImageAnalyzerService(self.config)
+        self._job_store = JobStatusStore()
         self._scanned_images: List[ImportedImage] = []
 
     def get_tab_name(self) -> str:
@@ -160,6 +162,7 @@ class ImageImporterAddon(BaseAddon):
                         "Check `logs/pipeline.log` for progress."
                     )
                     analyze_status = gr.Markdown("")
+                    analyze_job_status = gr.Markdown(self._get_job_status_md("image_analysis"))
 
                     captions_display = gr.Markdown(
                         label="Generierte Prompts",
@@ -183,6 +186,7 @@ class ImageImporterAddon(BaseAddon):
 
                 import_status = gr.Markdown("")
                 import_result = gr.JSON(label="Import Result", visible=False)
+                import_job_status = gr.Markdown(self._get_job_status_md("image_import"))
 
             # Helper function to update dropdown choices
             def update_dropdown_choices(state_data):
@@ -225,7 +229,7 @@ class ImageImporterAddon(BaseAddon):
             analyze_btn.click(
                 fn=self.analyze_images,
                 inputs=[images_state],
-                outputs=[analyze_status, captions_display, images_state]
+                outputs=[analyze_status, captions_display, images_state, analyze_job_status]
             )
 
             import_btn.click(
@@ -238,7 +242,7 @@ class ImageImporterAddon(BaseAddon):
                     rename_files,
                     use_image_resolution,
                 ],
-                outputs=[import_status, import_result]
+                outputs=[import_status, import_result, import_job_status]
             )
 
             # Refresh project status on tab load
@@ -384,18 +388,25 @@ class ImageImporterAddon(BaseAddon):
         status = f"✅ **{removed['filename']}** removed. **{len(images_state)} images** remaining."
         return status, gallery_data, table_data, images_state
 
-    def analyze_images(self, images_state: List[Dict]) -> Tuple[str, Any, List[Dict]]:
+    def analyze_images(self, images_state: List[Dict]) -> Tuple[str, Any, List[Dict], str]:
         """Analyze images with Florence-2 to generate prompts."""
         if not images_state:
-            return "❌ No images to analyze.", gr.update(visible=False), images_state
+            return "❌ No images to analyze.", gr.update(visible=False), images_state, self._get_job_status_md("image_analysis")
 
         # Check if ComfyUI is available
         if not self.analyzer_service.is_available():
-            return "❌ ComfyUI not reachable. Please start ComfyUI.", gr.update(visible=False), images_state
+            return "❌ ComfyUI not reachable. Please start ComfyUI.", gr.update(visible=False), images_state, self._get_job_status_md("image_analysis")
 
         total = len(images_state)
         results = []
         captions_md_parts = ["### Generated Prompts\n"]
+        self._job_store.set_status(
+            None,
+            "image_analysis",
+            "running",
+            message=f"Analyzing {total} images",
+            metadata={"total": total},
+        )
 
         for idx, img in enumerate(images_state):
             image_path = img["original_path"]
@@ -427,7 +438,21 @@ class ImageImporterAddon(BaseAddon):
             status += f" ({total - success_count} failed)"
 
         captions_md = "\n".join(captions_md_parts)
-        return status, gr.update(value=captions_md, visible=True), images_state
+        if success_count == total:
+            self._job_store.set_status(
+                None,
+                "image_analysis",
+                "completed",
+                message=f"Analyzed {success_count}/{total} images",
+            )
+        else:
+            self._job_store.set_status(
+                None,
+                "image_analysis",
+                "completed_with_issues",
+                message=f"Analyzed {success_count}/{total} images",
+            )
+        return status, gr.update(value=captions_md, visible=True), images_state, self._get_job_status_md("image_analysis")
 
     def import_images(
         self,
@@ -437,18 +462,18 @@ class ImageImporterAddon(BaseAddon):
         default_duration: float,
         rename_files: bool,
         use_image_resolution: bool,
-    ) -> Tuple[str, Dict]:
+    ) -> Tuple[str, Dict, str]:
         """Import images and create storyboard."""
         if not images_state:
-            return "❌ No images to import. Please scan a folder first.", {}
+            return "❌ No images to import. Please scan a folder first.", {}, self._get_job_status_md("image_import")
 
         project = self.project_manager.get_active_project(refresh=True)
         if not project:
-            return "❌ No active project. Please create a project in the '📁 Project' tab.", {}
+            return "❌ No active project. Please create a project in the '📁 Project' tab.", {}, self._get_job_status_md("image_import")
 
         project_path = project.get("path")
         if not project_path:
-            return "❌ Project path not found.", {}
+            return "❌ Project path not found.", {}, self._get_job_status_md("image_import")
 
         # Reconstruct ImportedImage objects from state (including generated prompts)
         images = [
@@ -466,6 +491,13 @@ class ImageImporterAddon(BaseAddon):
         ]
 
         try:
+            self._job_store.set_status(
+                project_path,
+                "image_import",
+                "running",
+                message=f"Importing {len(images)} images",
+                metadata={"total": len(images)},
+            )
             # Step 1: Copy images to keyframes folder
             keyframes_dir = os.path.join(project_path, "keyframes")
             imported_files = self.import_service.import_images(images, keyframes_dir, rename=rename_files)
@@ -549,8 +581,33 @@ class ImageImporterAddon(BaseAddon):
 
 *You can skip the Keyframe Generator and Selector!*
 """
-            return status_md, result
+            self._job_store.set_status(
+                project_path,
+                "image_import",
+                "completed",
+                message=f"Imported {len(images)} images",
+            )
+            return status_md, result, self._get_job_status_md("image_import")
 
         except Exception as e:
             logger.error(f"Import failed: {e}", exc_info=True)
-            return f"❌ Import failed: {str(e)}", {"success": False, "error": str(e)}
+            self._job_store.set_status(
+                project_path,
+                "image_import",
+                "failed",
+                message=str(e),
+            )
+            return f"❌ Import failed: {str(e)}", {"success": False, "error": str(e)}, self._get_job_status_md("image_import")
+
+    def _get_job_status_md(self, job_type: str) -> str:
+        """Return last job status for the given job type."""
+        status = self._job_store.get_status(None, job_type)
+        if not status:
+            return ""
+        updated = status.updated_at or "unknown time"
+        message = status.message or "No details"
+        return (
+            f"**Last job:** `{status.status}`\n\n"
+            f"{message}\n\n"
+            f"_Last updated: {updated}_"
+        )

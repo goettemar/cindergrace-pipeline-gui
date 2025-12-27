@@ -14,6 +14,7 @@ from infrastructure.config_manager import ConfigManager
 from infrastructure.comfy_api import ComfyUIAPI
 from infrastructure.workflow_registry import WorkflowRegistry, PREFIX_VIDEO_FIRSTLAST
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 from services.firstlast_video_service import FirstLastVideoService
 
 logger = get_logger(__name__)
@@ -40,6 +41,7 @@ class FirstLastVideoAddon(BaseAddon):
         self.config = ConfigManager()
         self.service = FirstLastVideoService(self.config)
         self.workflow_registry = WorkflowRegistry()
+        self._job_store = JobStatusStore()
 
     def get_tab_name(self) -> str:
         return "🎞️ Transition"
@@ -177,6 +179,7 @@ class FirstLastVideoAddon(BaseAddon):
                     "Check `logs/pipeline.log` for progress."
                 )
 
+                job_status_md = gr.Markdown(self._get_job_status_md("firstlast_generation"))
                 status_box = gr.Markdown("**Status:** Ready")
                 progress_bar = gr.Progress()
 
@@ -299,7 +302,7 @@ class FirstLastVideoAddon(BaseAddon):
             def generate_videos(images, clips, prompt, resolution_label, frames, fps, steps, workflow_file, progress=gr.Progress()):
                 """Generate all transition videos."""
                 if not images or not clips:
-                    return "**Status:** ❌ No images available", None
+                    return "**Status:** ❌ No images available", None, self._get_job_status_md("firstlast_generation")
 
                 # Get resolution
                 resolution = (1280, 720)
@@ -319,7 +322,7 @@ class FirstLastVideoAddon(BaseAddon):
                             clip_paths.append(paths)
 
                 if not clip_paths:
-                    return "**Status:** ❌ No valid clips (at least 2 images per clip required)", None
+                    return "**Status:** ❌ No valid clips (at least 2 images per clip required)", None, self._get_job_status_md("firstlast_generation")
 
                 total_transitions = sum(len(c) - 1 for c in clip_paths)
 
@@ -327,6 +330,13 @@ class FirstLastVideoAddon(BaseAddon):
                     progress(pct, desc=status)
 
                 progress(0, desc="Starting Generation...")
+                self._job_store.set_status(
+                    None,
+                    "firstlast_generation",
+                    "running",
+                    message=f"Generating {total_transitions} transitions",
+                    metadata={"transitions": total_transitions},
+                )
 
                 result = self.service.generate_all_clips(
                     clips=clip_paths,
@@ -355,9 +365,21 @@ class FirstLastVideoAddon(BaseAddon):
                             break
 
                     status = f"**Status:** ✅ {successful}/{total} clips generated ({result.total_transitions} transitions) in {result.duration_seconds:.1f}s"
-                    return status, last_video_path
+                    self._job_store.set_status(
+                        None,
+                        "firstlast_generation",
+                        "completed",
+                        message=f"Generated {successful}/{total} clips",
+                    )
+                    return status, last_video_path, self._get_job_status_md("firstlast_generation")
                 else:
-                    return f"**Status:** ❌ Error: {result.error}", None
+                    self._job_store.set_status(
+                        None,
+                        "firstlast_generation",
+                        "failed",
+                        message=result.error,
+                    )
+                    return f"**Status:** ❌ Error: {result.error}", None, self._get_job_status_md("firstlast_generation")
 
             def open_output_folder():
                 """Open the output folder."""
@@ -435,7 +457,7 @@ class FirstLastVideoAddon(BaseAddon):
             generate_btn.click(
                 fn=generate_videos,
                 inputs=[images_state, clips_state, prompt_input, resolution_dropdown, frames_slider, fps_slider, steps_slider, workflow_dropdown],
-                outputs=[status_box, last_video]
+                outputs=[status_box, last_video, job_status_md]
             )
 
             open_folder_btn.click(
@@ -455,6 +477,19 @@ class FirstLastVideoAddon(BaseAddon):
             )
 
         return interface
+
+    def _get_job_status_md(self, job_type: str) -> str:
+        """Return last job status for the given job type."""
+        status = self._job_store.get_status(None, job_type)
+        if not status:
+            return ""
+        updated = status.updated_at or "unknown time"
+        message = status.message or "No details"
+        return (
+            f"**Last job:** `{status.status}`\n\n"
+            f"{message}\n\n"
+            f"_Last updated: {updated}_"
+        )
 
     def _render_gallery(self, images: List[Dict]) -> List[Tuple[str, str]]:
         """Render gallery data from images list."""

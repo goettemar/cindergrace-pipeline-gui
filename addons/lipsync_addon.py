@@ -9,6 +9,7 @@ from addons.base_addon import BaseAddon
 from addons.components import format_project_status
 from infrastructure.config_manager import ConfigManager
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 from infrastructure.workflow_registry import WorkflowRegistry, PREFIX_LIPSYNC
 from services.lipsync_service import (
     LipsyncService,
@@ -60,6 +61,7 @@ class LipsyncAddon(BaseAddon):
         self.character_lora_service = CharacterLoraService(self.config)
         self.workflow_registry = WorkflowRegistry()
         self.audio_analyzer = AudioAnalyzerService(self.config)
+        self._job_store = JobStatusStore()
 
         # State
         self._current_image_path: Optional[str] = None
@@ -649,6 +651,7 @@ class LipsyncAddon(BaseAddon):
                         "continues in the backend but this page will lose tracking. "
                         "Check `logs/pipeline.log` for progress."
                     )
+                    job_status_md = gr.Markdown(self._get_job_status_md("lipsync_generation"))
                     progress_bar = gr.Markdown("")
                     generation_status = gr.Markdown("")
 
@@ -692,17 +695,17 @@ class LipsyncAddon(BaseAddon):
         def on_generate(workflow_file, prompt_text, neg_prompt, res_preset, steps_val, cfg_val, fps_val, name):
             # Validate workflow
             if not workflow_file:
-                yield "", "❌ Please select a workflow", None, ""
+                yield "", "❌ Please select a workflow", None, "", self._get_job_status_md("lipsync_generation")
                 return
 
             # Validate inputs
             if not self._current_image_path or not os.path.isfile(self._current_image_path):
-                yield "", "❌ Please upload an image first (Tab 1)", None, ""
+                yield "", "❌ Please upload an image first (Tab 1)", None, "", self._get_job_status_md("lipsync_generation")
                 return
 
             audio_path = self._trimmed_audio_path or self._current_audio_path
             if not audio_path or not os.path.isfile(audio_path):
-                yield "", "❌ Please upload and trim audio first (Tab 2)", None, ""
+                yield "", "❌ Please upload and trim audio first (Tab 2)", None, "", self._get_job_status_md("lipsync_generation")
                 return
 
             # Get resolution
@@ -722,7 +725,14 @@ class LipsyncAddon(BaseAddon):
                 fps=int(fps_val)
             )
 
-            yield "⏳ Starting Generation...", "", None, ""
+            self._job_store.set_status(
+                None,
+                "lipsync_generation",
+                "running",
+                message="Lipsync generation started",
+                metadata={"mode": "single", "workflow": workflow_file, "output": job.output_name},
+            )
+            yield "⏳ Starting Generation...", "", None, "", self._get_job_status_md("lipsync_generation")
 
             # Progress callback
             def progress_cb(pct, status):
@@ -735,21 +745,41 @@ class LipsyncAddon(BaseAddon):
 
             if success:
                 if os.path.isfile(result):
+                    self._job_store.set_status(
+                        None,
+                        "lipsync_generation",
+                        "completed",
+                        message="Lipsync generation completed",
+                    )
                     yield (
                         "✅ **Generation complete!**",
                         "",
                         result,
-                        f"**Output:** {result}"
+                        f"**Output:** {result}",
+                        self._get_job_status_md("lipsync_generation")
                     )
                 else:
+                    self._job_store.set_status(
+                        None,
+                        "lipsync_generation",
+                        "completed",
+                        message="Lipsync generation completed",
+                    )
                     yield (
                         f"✅ {result}",
                         "",
                         None,
-                        "Video in ComfyUI output folder"
+                        "Video in ComfyUI output folder",
+                        self._get_job_status_md("lipsync_generation")
                     )
             else:
-                yield "", f"❌ **Error:** {result}", None, ""
+                self._job_store.set_status(
+                    None,
+                    "lipsync_generation",
+                    "failed",
+                    message=result,
+                )
+                yield "", f"❌ **Error:** {result}", None, "", self._get_job_status_md("lipsync_generation")
 
         def on_refresh_workflows():
             choices = self._get_available_workflows()
@@ -760,18 +790,25 @@ class LipsyncAddon(BaseAddon):
             """Generate lipsync for all exported segments."""
             # Validate
             if not workflow_file:
-                yield "❌ Please select a workflow", "", None, ""
+                yield "❌ Please select a workflow", "", None, "", self._get_job_status_md("lipsync_batch")
                 return
 
             if not self._current_image_path or not os.path.isfile(self._current_image_path):
-                yield "❌ Please upload an image first (Tab 1)", "", None, ""
+                yield "❌ Please upload an image first (Tab 1)", "", None, "", self._get_job_status_md("lipsync_batch")
                 return
 
             if not self._exported_segments:
-                yield "❌ No segments exported. Go to Segmentation tab and export segments first.", "", None, ""
+                yield "❌ No segments exported. Go to Segmentation tab and export segments first.", "", None, "", self._get_job_status_md("lipsync_batch")
                 return
 
-            yield f"⏳ Starting batch generation ({len(self._exported_segments)} segments)...", "", None, ""
+            self._job_store.set_status(
+                None,
+                "lipsync_batch",
+                "running",
+                message=f"Batch generation started ({len(self._exported_segments)} segments)",
+                metadata={"segments": len(self._exported_segments)},
+            )
+            yield f"⏳ Starting batch generation ({len(self._exported_segments)} segments)...", "", None, "", self._get_job_status_md("lipsync_batch")
 
             # Create BatchSegments from exported files
             segments = []
@@ -785,7 +822,7 @@ class LipsyncAddon(BaseAddon):
                     ))
 
             if not segments:
-                yield "❌ No valid segment files found", "", None, ""
+                yield "❌ No valid segment files found", "", None, "", self._get_job_status_md("lipsync_batch")
                 return
 
             # Get resolution
@@ -813,7 +850,7 @@ class LipsyncAddon(BaseAddon):
 
                 # Concatenate if requested
                 if do_concat and len(result.videos) > 1:
-                    yield f"⏳ Concatenating {len(result.videos)} videos...", "", None, ""
+                    yield f"⏳ Concatenating {len(result.videos)} videos...", "", None, "", self._get_job_status_md("lipsync_batch")
 
                     import tempfile
                     concat_path = os.path.join(tempfile.gettempdir(), f"{name or 'lipsync_batch'}_full.mp4")
@@ -825,29 +862,50 @@ class LipsyncAddon(BaseAddon):
                     if success:
                         output_video_path = concat_result
                     else:
+                        self._job_store.set_status(
+                            None,
+                            "lipsync_batch",
+                            "completed_with_issues",
+                            message=f"Concat failed: {concat_result}",
+                        )
                         yield (
                             f"✅ Generated {result.completed_segments}/{result.total_segments} segments",
                             f"⚠️ Concat failed: {concat_result}",
                             result.videos[-1] if result.videos else None,
-                            f"**Videos:** {len(result.videos)} segments generated"
+                            f"**Videos:** {len(result.videos)} segments generated",
+                            self._get_job_status_md("lipsync_batch")
                         )
                         return
                 elif result.videos:
                     output_video_path = result.videos[-1]
 
+                self._job_store.set_status(
+                    None,
+                    "lipsync_batch",
+                    "completed",
+                    message=f"Completed {result.completed_segments}/{result.total_segments} segments",
+                )
                 yield (
                     f"✅ **Batch complete!** {result.completed_segments}/{result.total_segments} segments",
                     "",
                     output_video_path,
-                    f"**Output:** {output_video_path}" if output_video_path else ""
+                    f"**Output:** {output_video_path}" if output_video_path else "",
+                    self._get_job_status_md("lipsync_batch")
                 )
             else:
                 errors = "\n".join(result.errors[:3])
+                self._job_store.set_status(
+                    None,
+                    "lipsync_batch",
+                    "completed_with_issues",
+                    message=f"{result.completed_segments}/{result.total_segments} segments completed",
+                )
                 yield (
                     f"⚠️ Completed {result.completed_segments}/{result.total_segments}",
                     f"❌ Errors:\n{errors}",
                     result.videos[-1] if result.videos else None,
-                    ""
+                    "",
+                    self._get_job_status_md("lipsync_batch")
                 )
 
         # Wire up refresh button
@@ -860,14 +918,14 @@ class LipsyncAddon(BaseAddon):
         generate_btn.click(
             fn=on_generate,
             inputs=[workflow_dropdown, prompt, negative_prompt, resolution, steps, cfg, fps, output_name],
-            outputs=[progress_bar, generation_status, output_video, output_path_info]
+            outputs=[progress_bar, generation_status, output_video, output_path_info, job_status_md]
         )
 
         # Wire up batch generate button
         generate_batch_btn.click(
             fn=on_generate_batch,
             inputs=[workflow_dropdown, prompt, negative_prompt, resolution, steps, cfg, fps, output_name, use_frame_chaining, concat_output],
-            outputs=[progress_bar, generation_status, output_video, output_path_info]
+            outputs=[progress_bar, generation_status, output_video, output_path_info, job_status_md]
         )
 
         # Update summary when tab is shown (approximation via interval)
@@ -890,3 +948,16 @@ class LipsyncAddon(BaseAddon):
     def _get_default_flux_workflow(self) -> Optional[str]:
         """Get default Flux workflow."""
         return self.workflow_registry.get_default(PREFIX_KEYFRAME)
+
+    def _get_job_status_md(self, job_type: str) -> str:
+        """Return last job status for the given job type."""
+        status = self._job_store.get_status(None, job_type)
+        if not status:
+            return ""
+        updated = status.updated_at or "unknown time"
+        message = status.message or "No details"
+        return (
+            f"**Last job:** `{status.status}`\n\n"
+            f"{message}\n\n"
+            f"_Last updated: {updated}_"
+        )
