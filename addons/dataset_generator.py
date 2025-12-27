@@ -134,6 +134,12 @@ class DatasetGeneratorAddon(BaseAddon):
                         size="lg"
                     )
 
+                    gr.Markdown(
+                        "⚠️ **Do not refresh during generation.** If you refresh, the job "
+                        "continues in the backend but this page will lose tracking. "
+                        "Check `logs/pipeline.log` for progress."
+                    )
+
                     dataset_status = gr.Markdown("**Status:** Ready")
 
                 with gr.Group():

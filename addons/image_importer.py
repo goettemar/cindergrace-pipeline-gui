@@ -154,6 +154,11 @@ class ImageImporterAddon(BaseAddon):
                         variant="primary",
                         size="lg"
                     )
+                    gr.Markdown(
+                        "⚠️ **Do not refresh during analysis.** If you refresh, the job "
+                        "continues in the backend but this page will lose tracking. "
+                        "Check `logs/pipeline.log` for progress."
+                    )
                     analyze_status = gr.Markdown("")
 
                     captions_display = gr.Markdown(
@@ -169,6 +174,11 @@ class ImageImporterAddon(BaseAddon):
                     "📥 Import Images & Create Storyboard",
                     variant="primary",
                     size="lg"
+                )
+                gr.Markdown(
+                    "⚠️ **Do not refresh during import.** If you refresh, the job "
+                    "continues in the backend but this page will lose tracking. "
+                    "Check `logs/pipeline.log` for progress."
                 )
 
                 import_status = gr.Markdown("")

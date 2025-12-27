@@ -172,7 +172,7 @@ class TTSService:
             return False, f"Unbekannte Stimme: {voice_id}"
 
         # Prepare request
-        url = f"https://texttospeech.googleapis.com/v1/text:synthesize?key={api_key}"
+        url = "https://texttospeech.googleapis.com/v1/text:synthesize"
 
         audio_encoding = "MP3" if audio_format == "mp3" else "LINEAR16"
 
@@ -196,7 +196,10 @@ class TTSService:
             req = urllib.request.Request(
                 url,
                 data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Goog-Api-Key": api_key,
+                },
                 method="POST"
             )
 

@@ -23,6 +23,7 @@ from infrastructure.model_validator import ModelValidator
 from infrastructure.state_store import VideoGeneratorStateStore
 from infrastructure.project_store import ProjectStore
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 from infrastructure.comfy_api import ComfyUIAPI
 from infrastructure.error_handler import handle_errors
 from domain import models as domain_models
@@ -44,6 +45,7 @@ class VideoGeneratorAddon(BaseAddon):
         self.workflow_registry = WorkflowRegistry()
         self.project_manager = ProjectStore(self.config)
         self.state_store = VideoGeneratorStateStore()
+        self._job_store = JobStatusStore()
         self.model_validator = ModelValidator(self.config.get_comfy_root())
         if hasattr(self.model_validator, "rebuild_index"):
             self.model_validator.rebuild_index()  # Build index immediately at startup
@@ -204,6 +206,7 @@ class VideoGeneratorAddon(BaseAddon):
         progress_text_default = saved.get("progress_md", "No generation started yet.\n\n💡 **Tip:** During generation, check `logs/pipeline.log` and the ComfyUI terminal for real-time progress.")
         last_video_path = saved.get("last_video") if saved.get("last_video") and os.path.exists(saved.get("last_video")) else None
         preview_path = preview_path if preview_path and os.path.exists(str(preview_path)) else None
+        job_status_default = self._get_job_status_md(project)
 
         with gr.Blocks() as interface:
             # Unified header: Tab name left, project status right
@@ -285,6 +288,11 @@ class VideoGeneratorAddon(BaseAddon):
 
                     with gr.Group():
                         generate_btn = gr.Button("▶️ Generate Clips", variant="primary", size="lg")
+                        gr.Markdown(
+                            "⚠️ **Do not refresh during generation.** If you refresh, the job "
+                            "continues in the backend but this page will lose tracking. "
+                            "Check `logs/pipeline.log` for progress."
+                        )
 
                         # Confirmation dialog (initially hidden)
                         with gr.Group(visible=False) as confirm_group:
@@ -308,6 +316,7 @@ class VideoGeneratorAddon(BaseAddon):
 
             # === Status Section (below columns) ===
             with gr.Group():
+                job_status = gr.Markdown(job_status_default)
                 status_text = gr.Markdown(status_text_default)
                 progress_details = gr.Markdown(progress_text_default)
                 last_video = gr.Video(label="Latest Clip", value=last_video_path, visible=True)
@@ -357,6 +366,7 @@ class VideoGeneratorAddon(BaseAddon):
                     project_status,
                     workflow_dropdown,
                     model_dropdown,
+                    job_status,
                 ],
             )
 
@@ -382,6 +392,8 @@ class VideoGeneratorAddon(BaseAddon):
         model_update = self._on_workflow_change(default_workflow)
 
         # Return all outputs in correct order
+        project = self.project_manager.get_active_project(refresh=True)
+        job_status = self._get_job_status_md(project)
         return (
             result[0],          # storyboard_md
             result[1],          # storyboard_status
@@ -396,6 +408,22 @@ class VideoGeneratorAddon(BaseAddon):
             project_status,     # project_status
             workflow_update,    # workflow_dropdown
             model_update,       # model_dropdown
+            job_status,         # job_status
+        )
+
+    def _get_job_status_md(self, project: Optional[dict]) -> str:
+        """Return last video generation job status for this project."""
+        if not project:
+            return ""
+        status = self._job_store.get_status(project.get("path"), "video_generation")
+        if not status:
+            return ""
+        updated = status.updated_at or "unknown time"
+        message = status.message or "No details"
+        return (
+            f"**Last video job:** `{status.status}`\n\n"
+            f"{message}\n\n"
+            f"_Last updated: {updated}_"
         )
 
     def _reload_storyboard_ui(self):

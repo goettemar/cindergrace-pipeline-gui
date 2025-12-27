@@ -171,6 +171,12 @@ class FirstLastVideoAddon(BaseAddon):
                     generate_btn = gr.Button("▶️ Generate Videos", variant="primary", size="lg")
                     open_folder_btn = gr.Button("📁 Open Output Folder", variant="secondary")
 
+                gr.Markdown(
+                    "⚠️ **Do not refresh during generation.** If you refresh, the job "
+                    "continues in the backend but this page will lose tracking. "
+                    "Check `logs/pipeline.log` for progress."
+                )
+
                 status_box = gr.Markdown("**Status:** Ready")
                 progress_bar = gr.Progress()
 

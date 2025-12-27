@@ -13,6 +13,7 @@ from infrastructure.config_manager import ConfigManager
 from infrastructure.workflow_registry import WorkflowRegistry, PREFIX_KEYFRAME, PREFIX_KEYFRAME_LORA
 from infrastructure.project_store import ProjectStore
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 from infrastructure.error_handler import handle_errors
 from domain import models as domain_models
 from domain.storyboard_service import StoryboardService
@@ -41,6 +42,7 @@ class KeyframeGeneratorAddon(BaseAddon):
             config=self.config,
             project_store=self.project_manager
         )
+        self._job_store = JobStatusStore()
         self.character_lora_service = CharacterLoraService(self.config)
 
     def get_tab_name(self) -> str:
@@ -124,8 +126,15 @@ class KeyframeGeneratorAddon(BaseAddon):
                     # Start Generation Button
                     start_btn = gr.Button("▶️ Start Generation", variant="primary", size="lg")
 
+                    gr.Markdown(
+                        "⚠️ **Do not refresh during generation.** If you refresh, the job "
+                        "continues in the backend but this page will lose tracking. "
+                        "Check `logs/pipeline.log` for progress."
+                    )
+
                     # Status display
                     status_text = gr.Markdown("**Status:** Ready")
+                    job_status_text = gr.Markdown("")
                     progress_details = gr.Markdown("")
 
                     # Hidden components for checkpoint (needed by generation service)
@@ -194,7 +203,7 @@ class KeyframeGeneratorAddon(BaseAddon):
             # Auto-refresh storyboard on tab load
             interface.load(
                 fn=self._on_tab_load,
-                outputs=[project_status, status_text, workflow_dropdown, compatibility_warning]
+                outputs=[project_status, status_text, job_status_text, workflow_dropdown, compatibility_warning]
             )
 
         return interface
@@ -233,7 +242,24 @@ class KeyframeGeneratorAddon(BaseAddon):
         default_model = self._get_default_model(default_workflow)
         compatibility_update = self._check_character_model_compatibility(default_model)
 
-        return project_status, status, workflow_update, compatibility_update
+        project = self.project_manager.get_active_project(refresh=True)
+        job_status = self._get_job_status_md(project)
+        return project_status, status, job_status, workflow_update, compatibility_update
+
+    def _get_job_status_md(self, project: Optional[dict]) -> str:
+        """Return last job status for this project."""
+        if not project:
+            return ""
+        status = self._job_store.get_status(project.get("path"), "keyframe_generation")
+        if not status:
+            return ""
+        updated = status.updated_at or "unknown time"
+        message = status.message or "No details"
+        return (
+            f"**Last keyframe job:** `{status.status}`\n\n"
+            f"{message}\n\n"
+            f"_Last updated: {updated}_"
+        )
 
     @handle_errors("Failed to load storyboard", return_tuple=True)
     def _load_storyboard_model(self, storyboard_file: str) -> domain_models.Storyboard:

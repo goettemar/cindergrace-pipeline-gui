@@ -11,6 +11,7 @@ from infrastructure.project_store import ProjectStore
 from infrastructure.state_store import VideoGeneratorStateStore
 from infrastructure.comfy_api import ComfyUIAPI
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 from services.video.video_plan_builder import VideoPlanBuilder
 from services.video.file_operations import VideoFileHandler
 from services.video.last_frame_extractor import LastFrameExtractor
@@ -40,6 +41,7 @@ class VideoGenerationService:
         self.plan_builder = plan_builder or VideoPlanBuilder()
         self._file_handler = VideoFileHandler(project_store)
         self._cleanup_service = CleanupService(project_store)
+        self._job_store = JobStatusStore()
 
     def run_generation(
         self,
@@ -57,6 +59,13 @@ class VideoGenerationService:
         working_plan = copy.deepcopy(plan_state)
         logs: List[str] = []
         last_video_path: Optional[str] = None
+        self._job_store.set_status(
+            project.get("path"),
+            "video_generation",
+            "running",
+            message=f"Video generation started ({len(working_plan)} segments)",
+            metadata={"segments": len(working_plan)},
+        )
 
         # Cleanup old video and image files before starting generation
         cleanup_count = self._cleanup_service.cleanup_before_video_generation(project)
@@ -125,6 +134,29 @@ class VideoGenerationService:
                 logger.error(f"Video generation failed for {clip_label}: {exc}", exc_info=True)
 
             idx += 1
+
+        completed = sum(1 for entry in working_plan if entry.get("status") == "completed")
+        failed = sum(1 for entry in working_plan if str(entry.get("status", "")).startswith("error"))
+        warnings = sum(1 for entry in working_plan if entry.get("status") == "generated_no_copy")
+        if failed or warnings:
+            status = "completed_with_issues"
+            message = f"Completed {completed}/{len(working_plan)} segments, {failed} failed, {warnings} warnings"
+        else:
+            status = "completed"
+            message = f"Completed {completed}/{len(working_plan)} segments"
+
+        self._job_store.set_status(
+            project.get("path"),
+            "video_generation",
+            status,
+            message=message,
+            metadata={
+                "segments_total": len(working_plan),
+                "segments_completed": completed,
+                "segments_failed": failed,
+                "segments_warning": warnings,
+            },
+        )
 
         return working_plan, logs, last_video_path
 

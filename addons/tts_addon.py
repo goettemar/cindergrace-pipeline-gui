@@ -109,6 +109,12 @@ class TTSAddon(BaseAddon):
                         preview_btn = gr.Button("▶️ Preview (first 100 characters)", variant="secondary")
                         generate_btn = gr.Button("💾 Generate Audio", variant="primary")
 
+                    gr.Markdown(
+                        "⚠️ **Do not refresh during generation.** If you refresh, the job "
+                        "continues in the backend but this page will lose tracking. "
+                        "Check `logs/pipeline.log` for progress."
+                    )
+
                     with gr.Group():
                         gr.Markdown("### 🔊 Output")
 

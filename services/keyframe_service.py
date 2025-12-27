@@ -8,6 +8,7 @@ from infrastructure.workflow_registry import WorkflowRegistry
 from infrastructure.config_manager import ConfigManager
 from infrastructure.comfy_api import ComfyUIAPI
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 from domain.models import Storyboard
 from services.character_lora_service import CharacterLoraService
 from services.cleanup_service import CleanupService
@@ -72,6 +73,7 @@ class KeyframeGenerationService:
         self.api = comfy_api
         self.is_running = False
         self.stop_requested = False
+        self._job_store = JobStatusStore()
 
         # Initialize handlers
         self.character_lora_service = CharacterLoraService(config)
@@ -143,6 +145,17 @@ class KeyframeGenerationService:
     ) -> Generator[Tuple[List[str], str, str, Dict, str], None, None]:
         """Run the complete keyframe generation process."""
         try:
+            self._job_store.set_status(
+                project.get("path"),
+                "keyframe_generation",
+                "running",
+                message="Keyframe generation started",
+                metadata={
+                    "storyboard": storyboard.raw.get("storyboard_file"),
+                    "workflow": workflow_file,
+                },
+            )
+
             # Initialize API and test connection
             self.api = ComfyUIAPI(comfy_url)
             self.is_running = True
@@ -150,6 +163,12 @@ class KeyframeGenerationService:
             conn_result = self.api.test_connection()
             if not conn_result["connected"]:
                 self.is_running = False
+                self._job_store.set_status(
+                    project.get("path"),
+                    "keyframe_generation",
+                    "failed",
+                    message=f"Connection failed: {conn_result['error']}",
+                )
                 yield [], f"**❌ Error:** Connection failed - {conn_result['error']}", \
                       "Connection failed", checkpoint, "Error"
                 return
@@ -243,6 +262,15 @@ class KeyframeGenerationService:
 
             self.is_running = False
             self.stop_requested = False
+            self._job_store.set_status(
+                project.get("path"),
+                "keyframe_generation",
+                "completed",
+                message=(
+                    f"Generated {checkpoint['total_images_generated']} keyframes "
+                    f"for {len(checkpoint['completed_shots'])} shots"
+                ),
+            )
             yield all_generated_images, status, progress_details, checkpoint, "Complete"
 
         except Exception as e:
@@ -251,6 +279,12 @@ class KeyframeGenerationService:
             self._save_checkpoint(checkpoint, checkpoint["storyboard_file"], project)
             self.is_running = False
             self.stop_requested = False
+            self._job_store.set_status(
+                project.get("path"),
+                "keyframe_generation",
+                "failed",
+                message=str(e),
+            )
 
             logger.error(f"Generation failed: {e}", exc_info=True)
             yield [], f"**❌ Error:** {str(e)}", "Generation failed", checkpoint, "Error"
@@ -447,6 +481,12 @@ class KeyframeGenerationService:
         """Handle stop request during generation."""
         checkpoint["status"] = "stopped"
         self._save_checkpoint(checkpoint, checkpoint["storyboard_file"], project)
+        self._job_store.set_status(
+            project.get("path"),
+            "keyframe_generation",
+            "stopped",
+            message="Stopped by user",
+        )
 
         status = "**⏹️ Gestoppt:** Generation wurde vom Benutzer abgebrochen."
         progress_details = self._format_progress(checkpoint, total_shots)
