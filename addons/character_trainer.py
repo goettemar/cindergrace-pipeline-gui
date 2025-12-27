@@ -90,24 +90,104 @@ class CharacterTrainerAddon(BaseAddon):
 
         return interface
 
+    def _render_kohya_install_ui(self):
+        """Render installation UI when Kohya sd-scripts is not available."""
+        with gr.Group():
+            gr.Markdown(
+                "## ⚠️ Kohya sd-scripts nicht gefunden\n\n"
+                "Für LoRA Training wird das Kohya sd-scripts Paket benötigt.\n\n"
+                "**Was wird installiert:**\n"
+                "- Kohya sd-scripts Repository (~100 MB)\n"
+                "- PyTorch mit CUDA-Unterstützung (~2 GB)\n"
+                "- Python-Abhängigkeiten (~500 MB)\n\n"
+                "**Voraussetzungen:**\n"
+                "- NVIDIA GPU mit mindestens 8 GB VRAM\n"
+                "- CUDA-fähiger Treiber installiert\n"
+                "- Git installiert\n"
+                "- Stabile Internetverbindung\n\n"
+                "**Dauer:** 10-20 Minuten je nach Internetgeschwindigkeit"
+            )
+
+            install_log = gr.Textbox(
+                label="Installations-Log",
+                lines=12,
+                max_lines=20,
+                interactive=False,
+                show_copy_button=True,
+                visible=False
+            )
+
+            with gr.Row():
+                install_btn = gr.Button(
+                    "🔧 sd-scripts automatisch installieren",
+                    variant="primary",
+                    size="lg"
+                )
+                manual_info_btn = gr.Button(
+                    "📖 Manuelle Installation",
+                    variant="secondary",
+                    size="lg"
+                )
+
+            manual_instructions = gr.Markdown(
+                """
+**Manuelle Installation (falls automatisch fehlschlägt):**
+
+```bash
+cd tools
+git clone -b sd3 --depth 1 https://github.com/kohya-ss/sd-scripts.git
+cd sd-scripts
+python3 -m venv .venv
+.venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+.venv/bin/pip install -r requirements.txt
+```
+
+Nach der Installation diese Seite neu laden.
+                """,
+                visible=False
+            )
+
+            def toggle_manual():
+                return gr.update(visible=True)
+
+            def run_installation():
+                logs = []
+
+                def log_callback(msg):
+                    logs.append(msg)
+
+                yield gr.update(visible=True, value="🔄 Installation wird gestartet...\n")
+
+                # Run installation
+                success, message = self.kohya_service.install_kohya_scripts(log_callback)
+
+                final_log = "\n".join(logs)
+                if success:
+                    final_log += "\n\n✅ " + message
+                    final_log += "\n\n🔄 Bitte lade die Seite neu um das Training zu starten."
+                else:
+                    final_log += "\n\n❌ " + message
+
+                yield gr.update(value=final_log)
+
+            install_btn.click(
+                fn=run_installation,
+                inputs=[],
+                outputs=[install_log]
+            )
+
+            manual_info_btn.click(
+                fn=toggle_manual,
+                inputs=[],
+                outputs=[manual_instructions]
+            )
+
     def _render_kohya_training_ui(self):
         """Render the Kohya-based LoRA training UI."""
         # Check Kohya availability
         kohya_available = self.kohya_service.is_kohya_available()
         if not kohya_available:
-            gr.Markdown(
-                "**Kohya sd-scripts not found!**\n\n"
-                "Expected location: `tools/sd-scripts/`\n\n"
-                "Installation:\n"
-                "```bash\n"
-                "cd tools\n"
-                "git clone -b sd3 https://github.com/kohya-ss/sd-scripts\n"
-                "cd sd-scripts\n"
-                "python3 -m venv .venv\n"
-                ".venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128\n"
-                ".venv/bin/pip install -r requirements.txt\n"
-                "```"
-            )
+            self._render_kohya_install_ui()
             return
 
         with gr.Row():

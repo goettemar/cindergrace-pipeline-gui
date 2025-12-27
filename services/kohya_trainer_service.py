@@ -139,6 +139,244 @@ class KohyaTrainerService:
         """Check if Kohya sd-scripts is available."""
         return bool(self._kohya_path)
 
+    # ==================== Installation ====================
+
+    def get_install_path(self) -> Path:
+        """Get the target installation path for sd-scripts."""
+        cindergrace_root = Path(__file__).parent.parent.resolve()
+        return cindergrace_root / "tools" / "sd-scripts"
+
+    def _detect_cuda_version(self) -> str:
+        """Detect installed CUDA version for PyTorch installation.
+
+        Returns:
+            CUDA version string like 'cu128', 'cu124', 'cu121' or 'cpu'
+        """
+        import subprocess
+        import shutil
+
+        # Try nvidia-smi first
+        try:
+            result = subprocess.run(
+                ["nvidia-smi"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.split("\n"):
+                    if "CUDA Version" in line:
+                        parts = line.split("CUDA Version:")
+                        if len(parts) > 1:
+                            version = parts[1].strip().rstrip("|").strip()
+                            # Parse major.minor
+                            version_parts = version.split(".")
+                            if len(version_parts) >= 2:
+                                major = int(version_parts[0])
+                                minor = int(version_parts[1])
+                                # Map to PyTorch CUDA versions
+                                if major >= 12 and minor >= 8:
+                                    return "cu128"
+                                elif major >= 12 and minor >= 4:
+                                    return "cu124"
+                                elif major >= 12 and minor >= 1:
+                                    return "cu121"
+                                elif major >= 11 and minor >= 8:
+                                    return "cu118"
+                                else:
+                                    return "cu121"  # Default fallback
+        except Exception:
+            pass
+
+        # Try nvcc
+        nvcc = shutil.which("nvcc")
+        if nvcc:
+            try:
+                result = subprocess.run(
+                    ["nvcc", "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split("\n"):
+                        if "release" in line.lower():
+                            parts = line.split("release")
+                            if len(parts) > 1:
+                                version = parts[1].split(",")[0].strip()
+                                version_parts = version.split(".")
+                                if len(version_parts) >= 2:
+                                    major = int(version_parts[0])
+                                    minor = int(version_parts[1])
+                                    if major >= 12 and minor >= 8:
+                                        return "cu128"
+                                    elif major >= 12 and minor >= 4:
+                                        return "cu124"
+                                    elif major >= 12:
+                                        return "cu121"
+                                    else:
+                                        return "cu118"
+            except Exception:
+                pass
+
+        logger.warning("Could not detect CUDA version, defaulting to cu121")
+        return "cu121"
+
+    def install_kohya_scripts(
+        self,
+        log_callback: Optional[Callable[[str], None]] = None
+    ) -> Tuple[bool, str]:
+        """Install Kohya sd-scripts automatically.
+
+        This will:
+        1. Clone the sd-scripts repository (sd3 branch)
+        2. Create a Python virtual environment
+        3. Install PyTorch with detected CUDA version
+        4. Install requirements.txt
+
+        Args:
+            log_callback: Optional callback for log messages
+
+        Returns:
+            Tuple of (success, message)
+        """
+        import subprocess
+        import shutil
+
+        def log(msg: str):
+            logger.info(msg)
+            if log_callback:
+                log_callback(msg)
+
+        # Check prerequisites
+        git = shutil.which("git")
+        if not git:
+            return False, "Git ist nicht installiert. Bitte zuerst Git installieren."
+
+        python = shutil.which("python3") or shutil.which("python")
+        if not python:
+            return False, "Python3 ist nicht installiert."
+
+        install_path = self.get_install_path()
+        tools_dir = install_path.parent
+
+        # Check if already installed
+        if (install_path / "flux_train_network.py").exists():
+            log("sd-scripts ist bereits installiert.")
+            self._kohya_path = str(install_path)
+            return True, "sd-scripts ist bereits installiert."
+
+        try:
+            # Create tools directory if needed
+            tools_dir.mkdir(parents=True, exist_ok=True)
+            log(f"📁 Installationsverzeichnis: {install_path}")
+
+            # Step 1: Clone repository
+            log("📥 Klone Kohya sd-scripts Repository (sd3 branch)...")
+            log("   Dies kann einige Minuten dauern (~100MB)...")
+
+            result = subprocess.run(
+                ["git", "clone", "-b", "sd3", "--depth", "1",
+                 "https://github.com/kohya-ss/sd-scripts.git", str(install_path)],
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 min timeout
+                cwd=str(tools_dir)
+            )
+
+            if result.returncode != 0:
+                error_msg = result.stderr or result.stdout
+                log(f"❌ Git clone fehlgeschlagen: {error_msg}")
+                return False, f"Git clone fehlgeschlagen: {error_msg}"
+
+            log("✅ Repository erfolgreich geklont")
+
+            # Step 2: Create virtual environment
+            log("🐍 Erstelle Python Virtual Environment...")
+
+            venv_path = install_path / ".venv"
+            result = subprocess.run(
+                [python, "-m", "venv", str(venv_path)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=str(install_path)
+            )
+
+            if result.returncode != 0:
+                log(f"❌ venv Erstellung fehlgeschlagen: {result.stderr}")
+                return False, f"venv Erstellung fehlgeschlagen: {result.stderr}"
+
+            log("✅ Virtual Environment erstellt")
+
+            # Determine pip path
+            pip_path = venv_path / "bin" / "pip"
+            if not pip_path.exists():
+                pip_path = venv_path / "Scripts" / "pip.exe"  # Windows
+
+            # Step 3: Detect CUDA and install PyTorch
+            cuda_version = self._detect_cuda_version()
+            log(f"🔍 Erkannte CUDA-Version: {cuda_version}")
+
+            if cuda_version == "cpu":
+                pytorch_url = "https://download.pytorch.org/whl/cpu"
+            else:
+                pytorch_url = f"https://download.pytorch.org/whl/{cuda_version}"
+
+            log(f"📦 Installiere PyTorch mit {cuda_version}...")
+            log("   Dies kann 5-10 Minuten dauern (~2GB Download)...")
+
+            result = subprocess.run(
+                [str(pip_path), "install", "torch", "torchvision", "torchaudio",
+                 "--index-url", pytorch_url],
+                capture_output=True,
+                text=True,
+                timeout=1800,  # 30 min timeout
+                cwd=str(install_path)
+            )
+
+            if result.returncode != 0:
+                log(f"⚠️ PyTorch Installation Warnung: {result.stderr[:500]}")
+                # Continue anyway, might still work
+
+            log("✅ PyTorch installiert")
+
+            # Step 4: Install requirements
+            log("📦 Installiere sd-scripts Abhängigkeiten...")
+            log("   Dies kann 5-10 Minuten dauern...")
+
+            requirements_file = install_path / "requirements.txt"
+            if requirements_file.exists():
+                result = subprocess.run(
+                    [str(pip_path), "install", "-r", "requirements.txt"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1800,  # 30 min timeout
+                    cwd=str(install_path)
+                )
+
+                if result.returncode != 0:
+                    log(f"⚠️ Requirements Installation Warnung: {result.stderr[:500]}")
+                    # Continue anyway
+
+            log("✅ Abhängigkeiten installiert")
+
+            # Verify installation
+            if (install_path / "flux_train_network.py").exists():
+                self._kohya_path = str(install_path)
+                log("🎉 Installation erfolgreich abgeschlossen!")
+                log("   Du kannst jetzt LoRA Training verwenden.")
+                return True, "Installation erfolgreich!"
+            else:
+                return False, "Installation fehlgeschlagen - Training-Script nicht gefunden"
+
+        except subprocess.TimeoutExpired:
+            log("❌ Timeout - Installation hat zu lange gedauert")
+            return False, "Installation Timeout"
+        except Exception as e:
+            log(f"❌ Fehler: {str(e)}")
+            return False, f"Installation fehlgeschlagen: {str(e)}"
+
     # ==================== Model Type Management ====================
 
     def get_supported_model_types(self) -> List[KohyaModelType]:

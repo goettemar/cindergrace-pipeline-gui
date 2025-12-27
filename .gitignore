@@ -59,6 +59,7 @@ output/
 config/settings.json
 config/settings.json.backup
 data/cindergrace.db
+tools/sd-scripts/
 
 # Temporary files
 *.tmp

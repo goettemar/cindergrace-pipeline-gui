@@ -4,11 +4,15 @@ from infrastructure.comfy_api.updaters import (
     CLIPTextEncodeUpdater,
     SaveImageUpdater,
     SaveVideoUpdater,
+    SaveAnimatedWEBPUpdater,
     RandomNoiseUpdater,
     KSamplerUpdater,
     BasicSchedulerUpdater,
+    SamplerCustomUpdater,
     EmptyLatentImageUpdater,
     WanImageToVideoUpdater,
+    LTXVLatentUpdater,
+    VHSVideoCombineUpdater,
     LoadImageUpdater,
     HunyuanVideoSamplerUpdater,
     DiffusionModelUpdater,
@@ -680,18 +684,22 @@ class TestDefaultUpdaters:
         # Act
         updaters = list(default_updaters())
 
-        # Assert
-        assert len(updaters) == 13
+        # Assert - 17 updaters in total
+        assert len(updaters) == 17
         assert isinstance(updaters[0], CLIPTextEncodeUpdater)
         assert isinstance(updaters[1], SaveImageUpdater)
         assert isinstance(updaters[2], SaveVideoUpdater)
-        assert isinstance(updaters[3], RandomNoiseUpdater)
-        assert isinstance(updaters[4], KSamplerUpdater)
-        assert isinstance(updaters[5], BasicSchedulerUpdater)
-        assert isinstance(updaters[6], EmptyLatentImageUpdater)
-        assert isinstance(updaters[7], WanImageToVideoUpdater)
-        assert isinstance(updaters[8], LoadImageUpdater)
-        assert isinstance(updaters[9], HunyuanVideoSamplerUpdater)
-        assert isinstance(updaters[10], DiffusionModelUpdater)
-        assert isinstance(updaters[11], LoraLoaderUpdater)
-        assert isinstance(updaters[12], GenericSeedUpdater)
+        assert isinstance(updaters[3], SaveAnimatedWEBPUpdater)
+        assert isinstance(updaters[4], RandomNoiseUpdater)
+        assert isinstance(updaters[5], KSamplerUpdater)
+        assert isinstance(updaters[6], BasicSchedulerUpdater)
+        assert isinstance(updaters[7], SamplerCustomUpdater)
+        assert isinstance(updaters[8], EmptyLatentImageUpdater)
+        assert isinstance(updaters[9], WanImageToVideoUpdater)
+        assert isinstance(updaters[10], LTXVLatentUpdater)
+        assert isinstance(updaters[11], VHSVideoCombineUpdater)
+        assert isinstance(updaters[12], LoadImageUpdater)
+        assert isinstance(updaters[13], HunyuanVideoSamplerUpdater)
+        assert isinstance(updaters[14], DiffusionModelUpdater)
+        assert isinstance(updaters[15], LoraLoaderUpdater)
+        assert isinstance(updaters[16], GenericSeedUpdater)
