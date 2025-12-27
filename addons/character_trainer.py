@@ -272,6 +272,12 @@ class CharacterTrainerAddon(BaseAddon):
                             size="lg"
                         )
 
+                    gr.Markdown(
+                        "⚠️ **Do not refresh during training.** If you refresh, the job "
+                        "continues in the backend but this page will lose tracking. "
+                        "Check `logs/pipeline.log` for progress."
+                    )
+
                     kohya_status = gr.Markdown("**Status:** Ready")
 
                     kohya_progress = gr.Slider(

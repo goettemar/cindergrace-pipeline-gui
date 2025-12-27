@@ -4,6 +4,7 @@ Uses the OpenRouter API to access various LLM models (Claude, GPT-4, Llama, etc.
 for generating structured storyboard JSON from natural language descriptions.
 """
 import json
+import os
 import re
 from typing import Any, Dict, Optional
 
@@ -85,6 +86,19 @@ class OpenRouterClient:
         logger.warning(f"Could not extract JSON, returning raw text")
         return text.strip()
 
+    def _allow_sensitive_logs(self) -> bool:
+        """Check if sensitive LLM logging is explicitly enabled."""
+        return os.environ.get("CINDERGRACE_LLM_DEBUG", "").strip() == "1"
+
+    def _log_preview(self, label: str, text: str, limit: int = 200):
+        """Log a preview or redacted placeholder for sensitive text."""
+        if self._allow_sensitive_logs():
+            preview = text[:limit]
+            suffix = "..." if len(text) > limit else ""
+            logger.debug(f"{label} preview: {preview}{suffix}")
+        else:
+            logger.debug(f"{label} length: {len(text)} chars (redacted)")
+
     def generate_storyboard(
         self,
         idea: str,
@@ -124,7 +138,7 @@ class OpenRouterClient:
         }
 
         logger.info(f"Requesting storyboard generation from {model}")
-        logger.debug(f"Idea: {idea[:100]}...")
+        self._log_preview("Idea", idea, limit=120)
 
         try:
             response = self.session.post(
@@ -164,7 +178,7 @@ class OpenRouterClient:
 
             content = result["choices"][0]["message"]["content"]
             logger.info(f"LLM response received: {len(content)} chars")
-            logger.debug(f"Raw LLM response: {content[:1000]}...")
+            self._log_preview("LLM response", content, limit=500)
 
             # Extract and parse JSON
             json_str = self._extract_json(content)

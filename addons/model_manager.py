@@ -424,6 +424,12 @@ class ModelManagerAddon(BaseAddon):
                     download_all_btn = gr.Button("⬇️ Download All Found", variant="secondary")
                     cancel_downloads_btn = gr.Button("⏹️ Cancel Downloads", variant="stop")
 
+                gr.Markdown(
+                    "⚠️ **Do not refresh during downloads.** If you refresh, downloads "
+                    "continue in the backend but this page will lose tracking. "
+                    "Check `logs/pipeline.log` for progress."
+                )
+
                 download_status_text = gr.Markdown("**Status:** Run 'Analyze Models' first to identify missing models")
 
                 download_progress = gr.Progress()

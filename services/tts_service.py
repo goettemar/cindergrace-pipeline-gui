@@ -2,6 +2,7 @@
 import os
 import json
 import base64
+import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from pathlib import Path
@@ -219,12 +220,14 @@ class TTSService:
 
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8") if e.fp else ""
-            logger.error(f"Google TTS API error: {e.code} - {error_body}")
+            redacted_error = self._redact_api_key(error_body, api_key)
+            logger.error(f"Google TTS API error: {e.code} - {redacted_error}")
 
             if e.code == 403:
                 return False, "API-Fehler: Zugriff verweigert. Prüfe den API Key und ob TTS API aktiviert ist."
             elif e.code == 400:
-                return False, f"API-Fehler: Ungültige Anfrage. {error_body[:200]}"
+                safe_preview = redacted_error[:200] if redacted_error else ""
+                return False, f"API-Fehler: Ungültige Anfrage. {safe_preview}"
             else:
                 return False, f"API-Fehler: {e.code}"
 
@@ -246,6 +249,19 @@ class TTSService:
         import datetime
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{prefix}_{timestamp}.mp3"
+
+    def _redact_api_key(self, text: str, api_key: str) -> str:
+        """Redact API key from logs and error messages."""
+        if not text:
+            return text
+
+        redacted = text
+        if api_key:
+            redacted = redacted.replace(api_key, "***REDACTED***")
+
+        # Also redact common key query param patterns
+        redacted = re.sub(r"(key=)[^&\"'\\s]+", r"\\1***REDACTED***", redacted)
+        return redacted
 
 
 __all__ = ["TTSService", "VoiceOption", "GERMAN_VOICES", "ENGLISH_VOICES"]
