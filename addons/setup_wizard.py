@@ -33,16 +33,82 @@ class SetupWizardAddon(BaseAddon):
             # Unified header: Tab name left, no project relation
             gr.HTML(format_project_status(tab_name="🛠️ Setup Wizard", no_project_relation=True))
 
-            gr.Markdown(
-                "Welcome to **CINDERGRACE**! "
-                "This wizard will help you with the initial setup."
-            )
+            # Check if setup is already completed (static check at render time)
+            from infrastructure.settings_store import get_settings_store
+            store = get_settings_store()
+            setup_already_done = not self.config.is_first_run()
+            acceptance_date = store.get("disclaimer_accepted_date") or "unbekannt"
+
+            # === SETUP ALREADY COMPLETED VIEW ===
+            with gr.Column(visible=setup_already_done) as setup_done_view:
+                gr.Markdown(
+                    f"""
+                    ## ✅ Setup bereits abgeschlossen
+
+                    **CINDERGRACE ist bereits eingerichtet!**
+                    """
+                )
+
+                # Disclaimer in collapsible accordion
+                with gr.Accordion("📜 Nutzungsbedingungen & Disclaimer", open=False):
+                    gr.Markdown(f"✓ **Akzeptiert am:** {acceptance_date}")
+                    gr.Markdown(self._get_disclaimer_text())
+
+                gr.Markdown(
+                    """
+                    ---
+
+                    **Möchtest du Einstellungen ändern?**
+
+                    Alle Konfigurationen findest du im **⚙️ Settings** Tab:
+                    - ComfyUI Verbindung und Backend
+                    - API Keys (Civitai, Huggingface, etc.)
+                    - Auflösung und andere Optionen
+
+                    ---
+                    """
+                )
+
+                rerun_setup = gr.Checkbox(
+                    label="Setup Wizard erneut durchlaufen (setzt Einrichtung zurück)",
+                    value=False,
+                    info="Nur verwenden, wenn du die komplette Ersteinrichtung wiederholen möchtest."
+                )
+
+                rerun_btn = gr.Button("Setup Wizard neu starten", variant="secondary", visible=False)
+
+                def toggle_rerun_btn(checked):
+                    return gr.Button(visible=checked)
+
+                def reset_and_reload():
+                    """Reset setup_completed flag and trigger page reload."""
+                    store.delete("setup_completed")
+                    store.delete("disclaimer_accepted_date")
+                    return None
+
+                rerun_setup.change(
+                    fn=toggle_rerun_btn,
+                    inputs=[rerun_setup],
+                    outputs=[rerun_btn]
+                )
+
+                rerun_btn.click(
+                    fn=reset_and_reload,
+                    js="() => { setTimeout(() => window.location.reload(), 100); }"
+                )
+
+            # === SETUP WIZARD VIEW ===
+            with gr.Column(visible=not setup_already_done) as setup_wizard_view:
+                gr.Markdown(
+                    "Welcome to **CINDERGRACE**! "
+                    "This wizard will help you with the initial setup."
+                )
 
             # State for current step
             current_step = gr.State(value=0)
 
             # === STEP 0: Disclaimer ===
-            with gr.Column(visible=True) as step0:
+            with gr.Column(visible=not setup_already_done) as step0:
                 gr.Markdown("## Terms of Use & Disclaimer")
                 gr.Markdown("Please read and accept the following terms before continuing:")
 
@@ -182,33 +248,55 @@ class SetupWizardAddon(BaseAddon):
                         "Finish Setup", variant="primary", interactive=False
                     )
 
-            # === STEP 5: Complete ===
+            # === STEP 5: Complete - RESTART REQUIRED ===
             with gr.Column(visible=False) as step5:
-                gr.Markdown("## Setup Complete!")
+                gr.Markdown("## ✅ Setup Complete!")
+
+                gr.HTML(
+                    """
+                    <div style="
+                        background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+                        color: white;
+                        padding: 30px;
+                        border-radius: 12px;
+                        text-align: center;
+                        margin: 20px 0;
+                        box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+                    ">
+                        <div style="font-size: 3em; margin-bottom: 15px;">🎉</div>
+                        <h2 style="margin: 0 0 15px 0;">CINDERGRACE ist jetzt eingerichtet!</h2>
+                        <p style="margin: 0 0 20px 0; opacity: 0.95; font-size: 1.1em;">
+                            Die Konfiguration wurde gespeichert.
+                        </p>
+                        <div style="
+                            background: rgba(255,255,255,0.2);
+                            padding: 15px 20px;
+                            border-radius: 8px;
+                            margin-top: 15px;
+                        ">
+                            <p style="margin: 0; font-size: 1.2em; font-weight: bold;">
+                                🔄 Bitte starte die App jetzt neu!
+                            </p>
+                            <p style="margin: 10px 0 0 0; opacity: 0.9; font-size: 0.95em;">
+                                Drücke <strong>Ctrl+C</strong> im Terminal und starte mit <strong>./start.sh</strong> neu.
+                            </p>
+                        </div>
+                    </div>
+                    """
+                )
 
                 gr.Markdown(
                     """
-                **CINDERGRACE is now configured!**
-
-                If you created the example project, it's already loaded and ready to use.
-                Otherwise, create a new project in the **📁 Project** tab.
-
-                **Next steps:**
-                1. Go to **📝 Editor** to view or modify your storyboard
-                2. Generate keyframes in the **🎬 Keyframes** tab
-                3. Create videos in the **🎥 Video** tab
+                **Nach dem Neustart:**
+                1. Alle Tabs sind freigeschaltet
+                2. Dein Example-Projekt ist geladen (falls erstellt)
+                3. Du kannst direkt mit der Arbeit beginnen!
 
                 ---
 
-                💡 **Tip:** You can change all settings later in the **⚙️ Settings** tab,
-                including API keys, ComfyUI connection, and backends.
-
-                Good luck with your projects!
+                💡 **Tipp:** Einstellungen können jederzeit im **⚙️ Settings** Tab geändert werden.
                 """
                 )
-
-                with gr.Row():
-                    goto_project = gr.Button("Start Working", variant="primary")
 
             # === EVENT HANDLERS ===
 
@@ -294,6 +382,9 @@ class SetupWizardAddon(BaseAddon):
 
             def finish_setup(url, path, civitai, huggingface, google_tts, create_example_project):
                 """Saves configuration and completes setup."""
+                from datetime import datetime
+                from infrastructure.settings_store import get_settings_store
+
                 self.config.set("comfy_url", url)
                 if path:
                     self.config.set("comfy_root", path)
@@ -315,6 +406,11 @@ class SetupWizardAddon(BaseAddon):
                         logger.info("Example project created during setup")
                     except Exception as e:
                         logger.warning(f"Could not create example project: {e}")
+
+                # Store disclaimer acceptance date
+                acceptance_date = datetime.now().strftime("%d.%m.%Y um %H:%M Uhr")
+                store = get_settings_store()
+                store.set("disclaimer_accepted_date", acceptance_date)
 
                 self.config.mark_setup_completed()
 

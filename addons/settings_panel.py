@@ -87,14 +87,25 @@ class SettingsAddon(BaseAddon):
                 runpod_status = gr.Markdown("")
 
             # Local Backend Settings
-            with gr.Accordion("🖥️ Edit Local Backend", open=False):
+            # Open accordion by default if comfy_root is not configured (first run)
+            local_comfy_root = self.config.get_backends().get("local", {}).get("comfy_root", "")
+            needs_config = not local_comfy_root
+
+            with gr.Accordion("🖥️ Edit Local Backend", open=needs_config):
+                if needs_config:
+                    gr.Markdown(
+                        """<div style="background: #fff3cd; color: #856404; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+                        ⚠️ <strong>Bitte ComfyUI-Pfad eintragen</strong> - Dieser wird für Model-Validierung benötigt.
+                        </div>"""
+                    )
                 local_url = gr.Textbox(
                     value=self.config.get_backends().get("local", {}).get("url", "http://127.0.0.1:8188"),
                     label="Local ComfyUI URL"
                 )
                 local_root = gr.Textbox(
-                    value=self.config.get_backends().get("local", {}).get("comfy_root", ""),
+                    value=local_comfy_root,
                     label="ComfyUI Installation Path",
+                    placeholder="/path/to/ComfyUI",
                     info="Used for model validation"
                 )
                 save_local_btn = gr.Button("💾 Save Local Backend", variant="primary")

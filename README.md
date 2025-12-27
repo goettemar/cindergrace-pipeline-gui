@@ -9,7 +9,7 @@
 
 **AI-powered video production pipeline** - Professional Gradio GUI for ComfyUI with Flux Dev and Wan 2.2 integration.
 
-🔗 **[GitHub Repository](https://github.com/goettemar/cindergrace-pipeline-gui)** | 📖 **[Documentation](CONTRIBUTING.md)** | 🧪 **[Testing Guide](TESTING.md)**
+🔗 **[GitHub Repository](https://github.com/goettemar/cindergrace-pipeline-gui)** | 📖 **[Documentation](CONTRIBUTING.md)** | 🧪 **[Testing Guide](TESTING.md)** | 🛠️ **[Operations](OPERATIONS.md)**
 
 ---
 
@@ -72,64 +72,29 @@
 
 ## 🚀 Quick Start
 
-### 1. Setup
-
-**Keine manuelle Installation nötig!** Das `start.sh` Script installiert automatisch alle Dependencies.
+### Erstinstallation
 
 ```bash
-# (Optional) Manuell installieren:
-pip install -r requirements.txt
-
-# Add your ComfyUI workflow files
-# Place your Flux/Wan workflow JSON files in:
-# config/workflow_templates/
-# Ein Wan 2.2 Beispiel-Workflow liegt bereits hier:
-# config/workflow_templates/Wan 2.2 14B i2v.json
+git clone https://github.com/goettemar/cindergrace-pipeline-gui.git
+cd cindergrace-pipeline-gui
+./start.sh
 ```
 
-**Dependencies (automatisch installiert):**
-- gradio >= 4.0.0
-- pydantic >= 2.0.0 (Input-Validierung)
-- websocket-client >= 1.6.0
-- pillow >= 10.0.0
-- numpy >= 1.24.0
+Das `start.sh` Script erledigt automatisch:
+- Virtual Environment erstellen
+- Dependencies installieren
+- GUI-Server starten → Link wird angezeigt: http://127.0.0.1:7860
 
-### 2. Start ComfyUI
+### ComfyUI starten
 
-Make sure ComfyUI is running before launching the GUI:
+ComfyUI muss vor der GUI laufen:
 
 ```bash
 cd /path/to/ComfyUI
 python main.py --listen 127.0.0.1 --port 8188
 ```
 
-## ⚙️ Settings & Workflow-Presets
-
-- Tab **⚙️ Settings** (neu) erlaubt dir, `config/settings.json` direkt aus dem UI anzupassen (ComfyUI-URL & Installationspfad).
-- In `config/workflow_presets.json` definierst du, welche Workflows in den einzelnen Tabs angezeigt werden (z.B. Kategorien `flux`, `wan`).
-- Der ComfyUI-Installationspfad wird genutzt, um fehlende Modelle im Video Generator zu erkennen. Passe ihn auf dein Setup an, falls nötig.
-- Storyboard-Auswahl **und** globale Auflösung (720p/1080p, Hoch/Quer) stellst du zentral im Tab **📁 Projekt** ein; alle Tabs übernehmen diese Werte.
-
-### 3. Launch GUI
-
-```bash
-# Linux/Mac (empfohlen - installiert automatisch Dependencies)
-./start.sh
-
-# Or manually
-python3 main.py
-```
-
-**Das start.sh Script:**
-- ✅ Erstellt automatisch Virtual Environment (.venv)
-- ✅ Aktiviert die venv
-- ✅ Installiert/aktualisiert alle Dependencies
-- ✅ Prüft ComfyUI-Verbindung
-- ✅ Startet die GUI
-
-The GUI will open at: **http://127.0.0.1:7860**
-
-### 4. Projekt anlegen
+### Projekt anlegen
 
 - Öffne das Tab **📁 Projekt**.
 - Lege einen neuen Projektnamen an oder wähle ein bestehendes Projekt aus der Liste.
@@ -298,6 +263,7 @@ For detailed documentation, see:
 - **Pipeline docs:** `../CINDERGRACE_PIPELINE_README.md`
 - **Logging & Error Handling:** `LOGGING_ERROR_HANDLING.md` (NEW!)
 - **AI Context:** `CLAUDE.md`
+- **Operations Handbook:** `OPERATIONS.md`
 
 ## 🎯 Next Steps
 

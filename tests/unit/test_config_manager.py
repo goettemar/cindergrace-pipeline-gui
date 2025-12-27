@@ -316,7 +316,7 @@ class TestConfigManagerVideoSettings:
 
 
 class TestConfigManagerSetupWizard:
-    """Test setup wizard methods"""
+    """Test setup wizard methods - is_first_run only checks setup_completed flag"""
 
     @pytest.mark.unit
     def test_is_first_run_setup_completed(self):
@@ -327,30 +327,33 @@ class TestConfigManagerSetupWizard:
         assert manager.is_first_run() is False
 
     @pytest.mark.unit
-    def test_is_first_run_no_comfy_root(self):
-        """Should return True if comfy_root is not set"""
+    def test_is_first_run_setup_not_completed(self):
+        """Should return True if setup_completed is not set"""
         manager = ConfigManager()
-        # Clear any existing comfy_root
-        manager._store.delete("comfy_root")
+        # Clear setup_completed flag
+        manager._store.delete("setup_completed")
 
         assert manager.is_first_run() is True
 
     @pytest.mark.unit
-    def test_is_first_run_comfy_root_exists(self, tmp_path):
-        """Should return False if comfy_root exists"""
+    def test_is_first_run_setup_completed_false(self):
+        """Should return True if setup_completed is explicitly false"""
         manager = ConfigManager()
+        manager._store.set("setup_completed", "false")
+
+        assert manager.is_first_run() is True
+
+    @pytest.mark.unit
+    def test_is_first_run_ignores_comfy_root(self, tmp_path):
+        """is_first_run only checks setup_completed, not comfy_root"""
+        manager = ConfigManager()
+        # Set comfy_root but NOT setup_completed
         comfy_dir = tmp_path / "comfyui"
         comfy_dir.mkdir()
         manager._store.set_comfy_root(str(comfy_dir))
+        manager._store.delete("setup_completed")
 
-        assert manager.is_first_run() is False
-
-    @pytest.mark.unit
-    def test_is_first_run_comfy_root_not_exists(self):
-        """Should return True if comfy_root path doesn't exist"""
-        manager = ConfigManager()
-        manager._store.set_comfy_root("/nonexistent/path/to/comfyui")
-
+        # Should still be first run because setup_completed is not set
         assert manager.is_first_run() is True
 
     @pytest.mark.unit

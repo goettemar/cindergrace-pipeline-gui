@@ -228,19 +228,11 @@ class ConfigManager:
     # === Setup Wizard methods ===
 
     def is_first_run(self) -> bool:
-        """Check if this is the first run (setup not completed)."""
-        if self._get_bool("setup_completed", False):
-            return False
+        """Check if this is the first run (setup not completed).
 
-        comfy_root = self._store.get("comfy_root") or ""
-        if not comfy_root:
-            return True
-
-        expanded_path = os.path.expanduser(comfy_root)
-        if os.path.isdir(expanded_path):
-            return False
-
-        return True
+        Returns True only if setup_completed is not set to 'true'.
+        """
+        return not self._get_bool("setup_completed", False)
 
     def mark_setup_completed(self) -> None:
         """Mark the setup wizard as completed."""

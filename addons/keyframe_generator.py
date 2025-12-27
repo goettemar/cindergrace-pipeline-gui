@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 import json
 from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any, Generator
@@ -462,7 +463,7 @@ class KeyframeGeneratorAddon(BaseAddon):
             return "**❌ Error:** No active project. Please select one in the 'Project' tab."
         output_dir = self.project_manager.ensure_dir(project, "keyframes")
         os.makedirs(output_dir, exist_ok=True)
-        os.system(f'xdg-open "{output_dir}"')
+        subprocess.run(["xdg-open", output_dir], check=False)
         return f"**📁 Opened:** `{output_dir}`"
 
     def _get_available_workflows(self) -> List[str]:

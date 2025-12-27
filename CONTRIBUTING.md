@@ -244,6 +244,32 @@ Branch naming:
 - Add tests for new functionality
 - Update documentation if needed
 
+### Release / Update Assets (minisign)
+
+For the built-in updater to verify releases, publish signed assets:
+
+1) Create update tarball:
+```bash
+tar -czf update_<version>.tar.gz <source_dir>
+```
+
+2) Sign the tarball:
+```bash
+minisign -S -m update_<version>.tar.gz -s <private_key>
+```
+
+3) Optional SHA256:
+```bash
+sha256sum update_<version>.tar.gz > update_<version>.sha256
+```
+
+4) Upload to the GitHub Release as assets:
+- `update_<version>.tar.gz`
+- `update_<version>.tar.gz.minisig`
+- `update_<version>.sha256` (optional)
+
+The public key used for verification is pinned at `config/update_public_key.pub`.
+
 ### 3. Commit Changes
 
 ```bash

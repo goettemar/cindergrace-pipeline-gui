@@ -13,6 +13,7 @@ import shutil
 import tarfile
 import tempfile
 import subprocess
+import hashlib
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Tuple, List, NamedTuple
@@ -58,6 +59,10 @@ class VersionInfo:
     published_at: str
     download_url: str
     tarball_url: str
+    sha256_url: Optional[str] = None
+    tarball_name: Optional[str] = None
+    minisig_url: Optional[str] = None
+    minisig_name: Optional[str] = None
 
 
 @dataclass
@@ -121,6 +126,12 @@ class UpdaterService:
             if not latest_tag:
                 return False, None, "Konnte Version nicht ermitteln"
 
+            assets = data.get("assets", []) or []
+            tarball_url, tarball_name, sha256_url, minisig_url, minisig_name = self._select_update_assets(
+                assets,
+                latest_tag
+            )
+
             version_info = VersionInfo(
                 version=latest_tag,
                 tag_name=data.get("tag_name", ""),
@@ -128,7 +139,11 @@ class UpdaterService:
                 body=data.get("body", "Keine Release Notes verfügbar"),
                 published_at=data.get("published_at", ""),
                 download_url=data.get("html_url", ""),
-                tarball_url=data.get("tarball_url", ""),
+                tarball_url=tarball_url or data.get("tarball_url", ""),
+                sha256_url=sha256_url,
+                tarball_name=tarball_name,
+                minisig_url=minisig_url,
+                minisig_name=minisig_name,
             )
 
             # Compare versions
@@ -314,7 +329,7 @@ class UpdaterService:
                 temp_path = Path(temp_dir)
 
                 with tarfile.open(backup.path, "r:gz") as tar:
-                    tar.extractall(temp_path)
+                    self._safe_extract(tar, temp_path)
 
                 # Remove current files (except excluded)
                 for item in self.app_dir.iterdir():
@@ -357,7 +372,8 @@ class UpdaterService:
             download_dir = self.backup_dir / "downloads"
             download_dir.mkdir(exist_ok=True)
 
-            download_path = download_dir / f"update_{version_info.version}.tar.gz"
+            download_name = version_info.tarball_name or f"update_{version_info.version}.tar.gz"
+            download_path = download_dir / download_name
 
             req = urllib.request.Request(
                 version_info.tarball_url,
@@ -367,6 +383,24 @@ class UpdaterService:
             with urllib.request.urlopen(req, timeout=60) as response:
                 with open(download_path, "wb") as f:
                     f.write(response.read())
+
+            minisig_path = None
+            if version_info.minisig_url:
+                minisig_name = version_info.minisig_name or f"{download_name}.minisig"
+                minisig_path = download_dir / minisig_name
+                success, msg = self._download_asset(version_info.minisig_url, minisig_path, timeout=30)
+                if not success:
+                    return False, f"Signatur-Download fehlgeschlagen: {msg}", None
+
+            if version_info.sha256_url:
+                verified, verify_msg = self._verify_sha256(download_path, version_info.sha256_url)
+                if not verified:
+                    return False, f"Hash-Check fehlgeschlagen: {verify_msg}", None
+
+            if version_info.minisig_url:
+                verified, verify_msg = self._verify_minisign(download_path, minisig_path)
+                if not verified:
+                    return False, f"Signatur-Check fehlgeschlagen: {verify_msg}", None
 
             size_mb = download_path.stat().st_size / (1024 * 1024)
             logger.info(f"Download complete: {download_path} ({size_mb:.1f} MB)")
@@ -401,7 +435,7 @@ class UpdaterService:
                 temp_path = Path(temp_dir)
 
                 with tarfile.open(download_path, "r:gz") as tar:
-                    tar.extractall(temp_path)
+                    self._safe_extract(tar, temp_path)
 
                 # GitHub tarballs have a root folder like "repo-name-version/"
                 extracted_dirs = list(temp_path.iterdir())
@@ -484,6 +518,139 @@ class UpdaterService:
             msg = f"Fehler beim Aktualisieren der Dependencies: {str(e)}"
             logger.error(msg, exc_info=True)
             return False, msg
+
+    def _select_update_assets(
+        self,
+        assets: List[dict],
+        version: str
+    ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
+        """Select release assets for update tarball and optional SHA256/signature."""
+        if not assets:
+            return None, None, None, None, None
+
+        tarball_name = f"update_{version}.tar.gz"
+        sha_name = f"update_{version}.sha256"
+        minisig_name = f"update_{version}.tar.gz.minisig"
+
+        tarball_url = None
+        sha256_url = None
+        minisig_url = None
+
+        for asset in assets:
+            name = asset.get("name", "")
+            url = asset.get("browser_download_url", "")
+            if name == tarball_name:
+                tarball_url = url
+            elif name == sha_name:
+                sha256_url = url
+            elif name == minisig_name:
+                minisig_url = url
+
+        return (
+            tarball_url,
+            tarball_name if tarball_url else None,
+            sha256_url,
+            minisig_url,
+            minisig_name if minisig_url else None,
+        )
+
+    def _verify_sha256(self, download_path: Path, sha256_url: str) -> Tuple[bool, str]:
+        """Verify download against SHA256 file."""
+        try:
+            req = urllib.request.Request(
+                sha256_url,
+                headers={"User-Agent": "CINDERGRACE-Updater"}
+            )
+            with urllib.request.urlopen(req, timeout=30) as response:
+                sha_text = response.read().decode("utf-8", errors="replace").strip()
+
+            expected_hash = sha_text.split()[0] if sha_text else ""
+            if not expected_hash or len(expected_hash) < 64:
+                return False, "SHA256-Datei ungueltig"
+
+            actual_hash = self._sha256_file(download_path)
+            if actual_hash.lower() != expected_hash.lower():
+                return False, "SHA256 stimmt nicht ueberein"
+
+            return True, "OK"
+        except Exception as e:
+            logger.error(f"SHA256 verification failed: {e}")
+            return False, str(e)
+
+    def _download_asset(self, url: str, dest_path: Path, timeout: int = 30) -> Tuple[bool, str]:
+        """Download a small asset like a signature file."""
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "CINDERGRACE-Updater"}
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                with open(dest_path, "wb") as f:
+                    f.write(response.read())
+            return True, "OK"
+        except Exception as e:
+            logger.error(f"Asset download failed: {e}")
+            return False, str(e)
+
+    def _verify_minisign(self, download_path: Path, minisig_path: Optional[Path]) -> Tuple[bool, str]:
+        """Verify download against minisign signature."""
+        if not minisig_path or not minisig_path.exists():
+            return False, "Signaturdatei fehlt"
+
+        if not shutil.which("minisign"):
+            return False, "minisign nicht installiert"
+
+        pubkey_path = self._get_public_key_path()
+        if not pubkey_path.exists():
+            return False, f"Public-Key fehlt: {pubkey_path}"
+
+        result = subprocess.run(
+            [
+                "minisign",
+                "-V",
+                "-m",
+                str(download_path),
+                "-x",
+                str(minisig_path),
+                "-p",
+                str(pubkey_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return False, (result.stderr or result.stdout or "minisign verify failed").strip()
+
+        return True, "OK"
+
+    def _get_public_key_path(self) -> Path:
+        """Get pinned minisign public key path."""
+        return self.app_dir / "config" / "update_public_key.pub"
+
+    def _sha256_file(self, path: Path) -> str:
+        """Compute SHA256 for a file."""
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _safe_extract(self, tar: tarfile.TarFile, dest: Path):
+        """Safely extract tar into dest directory."""
+        dest_resolved = dest.resolve()
+        for member in tar.getmembers():
+            if member.islnk() or member.issym():
+                raise Exception(f"Symlink in tar archive not allowed: {member.name}")
+            member_path = (dest_resolved / member.name).resolve()
+            if not self._is_within_directory(dest_resolved, member_path):
+                raise Exception(f"Path traversal detected in tar archive: {member.name}")
+        tar.extractall(dest)
+
+    def _is_within_directory(self, base: Path, target: Path) -> bool:
+        """Check if target path is within base directory."""
+        base_str = str(base)
+        target_str = str(target)
+        return os.path.commonpath([base_str, target_str]) == base_str
 
 
 # Singleton instance

@@ -314,9 +314,12 @@ class SettingsStore:
         self.set("comfy_url", url)
 
     def get_comfy_root(self) -> str:
-        """Get ComfyUI installation root path."""
-        default = os.path.expanduser("~/comfyui")
-        return os.path.expanduser(self.get("comfy_root", default))
+        """Get ComfyUI installation root path.
+
+        Returns empty string if not configured - user must set this explicitly.
+        """
+        value = self.get("comfy_root", "")
+        return os.path.expanduser(value) if value else ""
 
     def set_comfy_root(self, path: str) -> None:
         """Set ComfyUI installation root path."""

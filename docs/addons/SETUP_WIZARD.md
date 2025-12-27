@@ -2,48 +2,112 @@
 
 **Tab Name:** Setup
 **File:** `addons/setup_wizard.py`
-**Version:** v0.6.0
-**Last Updated:** December 16, 2025
+**Version:** v0.6.1
+**Last Updated:** December 26, 2025
 
 ---
 
 ## Overview
 
-Der Setup-Assistent führt neue Benutzer durch die Ersteinrichtung von CINDERGRACE. Er prüft Systemabhängigkeiten, bietet Installationsanleitungen für ComfyUI und konfiguriert die Verbindung zum Backend.
+Der Setup-Assistent führt neue Benutzer durch die Ersteinrichtung von CINDERGRACE. Er beginnt mit dem Disclaimer/Nutzungsbedingungen, prüft Systemabhängigkeiten, bietet Installationsanleitungen für ComfyUI, konfiguriert die Verbindung zum Backend und ermöglicht die Eingabe von API-Keys.
 
 ---
 
 ## Features
 
+- **Disclaimer & Nutzungsbedingungen** - Rechtliche Hinweise vor der Nutzung
 - **Systemprüfung** - Automatische Erkennung von Abhängigkeiten (Python, ffmpeg, etc.)
 - **ComfyUI Installation** - Schritt-für-Schritt Anleitung für Windows und Linux
 - **Konfiguration** - ComfyUI Pfad und URL einstellen
+- **API Keys** - Civitai, Huggingface, Google TTS (verschlüsselt gespeichert)
 - **Verbindungstest** - Prüfe ComfyUI-Erreichbarkeit
+- **Example Project** - Optional ein Beispielprojekt erstellen
+- **Setup-Reset** - Möglichkeit den Wizard erneut zu durchlaufen
 
 ---
 
 ## UI Structure
 
+### Setup bereits abgeschlossen (Nach Ersteinrichtung)
+
+Nach erfolgreicher Ersteinrichtung zeigt der Setup-Tab eine Zusammenfassung:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ ## ✅ Setup bereits abgeschlossen                           │
+│                                                             │
+│ **CINDERGRACE ist bereits eingerichtet!**                   │
+│                                                             │
+│ ▼ 📜 Nutzungsbedingungen & Disclaimer (aufklappbar)        │
+│ ┌─────────────────────────────────────────────────────────┐│
+│ │ ✓ Akzeptiert am: 26.12.2025 um 21:29 Uhr               ││
+│ │                                                         ││
+│ │ ### 1. Disclaimer of Warranty                           ││
+│ │ This software is provided "AS IS"...                    ││
+│ │ ...                                                     ││
+│ └─────────────────────────────────────────────────────────┘│
+│                                                             │
+│ **Möchtest du Einstellungen ändern?**                       │
+│ Alle Konfigurationen findest du im ⚙️ Settings Tab          │
+│                                                             │
+│ ☐ Setup Wizard erneut durchlaufen (setzt Einrichtung zurück)│
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Step 0: Disclaimer & Nutzungsbedingungen
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ ## Terms of Use & Disclaimer                                │
+│                                                             │
+│ Please read and accept the following terms:                 │
+│                                                             │
+│ ### 1. Disclaimer of Warranty                               │
+│ This software is provided "AS IS" without warranty...       │
+│                                                             │
+│ ### 2. License - Private Use Only                           │
+│ ❌ Commercial use, resale, distribution                     │
+│ ✅ Private use on your own systems                          │
+│                                                             │
+│ ### 3. Responsibility for AI-Generated Content              │
+│ You bear sole responsibility for all content...             │
+│                                                             │
+│ ### 4. Third-Party Models                                   │
+│ Comply with respective license terms...                     │
+│                                                             │
+│ ### 5. Alpha/Beta Status                                    │
+│ Errors, crashes, data loss may occur...                     │
+│                                                             │
+│ ### 6. Indemnification                                      │
+│ You agree to indemnify and hold harmless...                 │
+│                                                             │
+│ ☐ I have read, understood, and accept the Terms of Use      │
+│                                                             │
+│                                              [Continue →]   │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ### Step 1: Systemprüfung
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ ## Schritt 1: Systemprüfung                                 │
+│ ## Step 1: System Check                                     │
 │                                                             │
-│ [System erneut prüfen]                                      │
+│ [Check system again]                                        │
 │                                                             │
-│ **Betriebssystem:** Ubuntu 22.04 LTS (x86_64)              │
+│ **Operating System:** Ubuntu 22.04 LTS (x86_64)            │
 │                                                             │
-│ ### Abhängigkeiten                                          │
+│ ### Dependencies                                            │
 │ - **Python:** [OK] v3.11.0                                  │
 │ - **pip:** [OK] v23.0.1                                     │
 │ - **ffmpeg:** [OK] v5.1.2                                   │
 │ - **git:** [OK] v2.34.1                                     │
 │ - **CUDA:** [OK] v12.1                                      │
 │                                                             │
-│ **System ist bereit für CINDERGRACE.**                      │
+│ **System is ready for CINDERGRACE.**                        │
 │                                                             │
-│                                              [Weiter →]     │
+│                                              [Next →]       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -51,25 +115,25 @@ Der Setup-Assistent führt neue Benutzer durch die Ersteinrichtung von CINDERGRA
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ ## Schritt 2: ComfyUI                                       │
+│ ## Step 2: ComfyUI                                          │
 │                                                             │
-│ ComfyUI ist die KI-Backend-Software, die CINDERGRACE für    │
-│ die Bild- und Videogenerierung verwendet.                   │
+│ ComfyUI is the AI backend software that CINDERGRACE uses    │
+│ for image and video generation.                             │
 │                                                             │
-│ Haben Sie ComfyUI bereits installiert?                      │
+│ Do you have ComfyUI installed?                              │
 │                                                             │
-│ ○ Ja, ComfyUI ist bereits installiert                      │
-│ ○ Nein, ich muss ComfyUI noch installieren                 │
+│ ○ Yes, ComfyUI is already installed                        │
+│ ○ No, I still need to install ComfyUI                      │
 │                                                             │
-│                              [← Zurück]    [Weiter →]       │
+│                              [← Back]    [Next →]           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Step 3: Installationsanleitung
+### Step 3: Installationsanleitung (falls "No" gewählt)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ ## Schritt 3: ComfyUI Installation                          │
+│ ## Step 3: ComfyUI Installation                             │
 │                                                             │
 │ ┌─────────┬─────────┐                                       │
 │ │ Windows │  Linux  │                                       │
@@ -77,23 +141,21 @@ Der Setup-Assistent führt neue Benutzer durch die Ersteinrichtung von CINDERGRA
 │                                                             │
 │ ### Windows Installation                                    │
 │                                                             │
-│ #### Option 1: Portable Version (Empfohlen)                 │
+│ #### Option 1: Portable Version (Recommended)               │
 │ 1. Download: ComfyUI_windows_portable_*.7z                 │
-│ 2. Entpacken nach C:\ComfyUI_portable                      │
-│ 3. run_nvidia_gpu.bat ausführen                            │
+│ 2. Extract to C:\ComfyUI_portable                          │
+│ 3. Run run_nvidia_gpu.bat                                  │
 │                                                             │
 │ #### Option 2: Git Installation                             │
 │ ```                                                         │
 │ git clone https://github.com/comfyanonymous/ComfyUI.git    │
-│ cd ComfyUI                                                  │
-│ python -m venv venv                                         │
 │ ...                                                         │
 │ ```                                                         │
 │                                                             │
-│ **Hinweis:** Nach der Installation müssen Sie ComfyUI       │
-│ starten, bevor Sie fortfahren können.                       │
+│ **Note:** After installation, you must start ComfyUI        │
+│ before you can continue.                                    │
 │                                                             │
-│                 [← Zurück]  [ComfyUI ist installiert →]     │
+│        [← Back]  [ComfyUI is installed and running →]       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -101,38 +163,61 @@ Der Setup-Assistent führt neue Benutzer durch die Ersteinrichtung von CINDERGRA
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ ## Schritt 4: Konfiguration                                 │
+│ ## Step 4: Configuration                                    │
 │                                                             │
-│ Geben Sie den Pfad zu Ihrer ComfyUI-Installation ein:       │
+│ ### ComfyUI Settings                                        │
+│ Enter the path to your ComfyUI installation:                │
 │                                                             │
-│ ComfyUI-Installationspfad:                                  │
+│ ComfyUI Installation Path:                                  │
 │ [/home/user/ComfyUI_____________________________]           │
 │                                                             │
-│ ComfyUI-Server URL:                                         │
+│ ComfyUI Server URL:                                         │
 │ [http://127.0.0.1:8188__________________________]           │
 │                                                             │
-│ **Verbindung erfolgreich!** ComfyUI ist erreichbar.         │
+│ **Connection successful!** ComfyUI is reachable.            │
 │                                                             │
-│ [Verbindung testen]  [← Zurück]  [Setup abschließen ✓]     │
+│ [Test Connection]                                           │
+│                                                             │
+│ ---                                                         │
+│ ### API Keys (Optional)                                     │
+│ These keys enable additional features.                      │
+│ They are stored **encrypted** in the local database.        │
+│                                                             │
+│ Civitai API Key:      [********************************]    │
+│ Huggingface Token:    [________________________________]    │
+│ Google TTS API Key:   [________________________________]    │
+│                                                             │
+│ ---                                                         │
+│ ### Quick Start                                             │
+│ ☑ Create example project with sample storyboard             │
+│                                                             │
+│               [← Back]              [Finish Setup ✓]        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Step 5: Abschluss
+### Step 5: Abschluss (Neustart erforderlich)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ ## Setup abgeschlossen!                                     │
+│ ## ✅ Setup Complete!                                       │
 │                                                             │
-│ **CINDERGRACE ist jetzt eingerichtet!**                     │
+│ ┌─────────────────────────────────────────────────────────┐│
+│ │           🎉 CINDERGRACE ist jetzt eingerichtet!        ││
+│ │                                                         ││
+│ │   Die Konfiguration wurde gespeichert.                  ││
+│ │                                                         ││
+│ │   🔄 Bitte starte die App jetzt neu!                    ││
+│ │   Drücke Ctrl+C im Terminal und starte mit              ││
+│ │   ./start.sh neu.                                       ││
+│ └─────────────────────────────────────────────────────────┘│
 │                                                             │
-│ Sie können jetzt:                                           │
-│ 1. Im **Projekt**-Tab ein neues Projekt erstellen          │
-│ 2. Im **Keyframe-Generator** Bilder generieren             │
-│ 3. Im **Video-Generator** Videos erstellen                 │
+│ **Nach dem Neustart:**                                      │
+│ 1. Alle Tabs sind freigeschaltet                            │
+│ 2. Dein Example-Projekt ist geladen (falls erstellt)        │
+│ 3. Du kannst direkt mit der Arbeit beginnen!                │
 │                                                             │
-│ Viel Erfolg mit Ihren Projekten!                            │
-│                                                             │
-│                                      [Zum Projekt-Tab →]    │
+│ 💡 Einstellungen können jederzeit im ⚙️ Settings Tab        │
+│    geändert werden.                                         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -141,22 +226,30 @@ Der Setup-Assistent führt neue Benutzer durch die Ersteinrichtung von CINDERGRA
 ## Workflow
 
 ```
-┌─────────────┐    ┌──────────────┐    ┌───────────────┐
-│ System-     │───▶│ ComfyUI      │───▶│ Installation  │
-│ prüfung     │    │ Status       │    │ (optional)    │
-└─────────────┘    └──────────────┘    └───────────────┘
-                          │                    │
-                          │ (bereits installiert)
-                          ▼                    ▼
-                   ┌──────────────┐    ┌───────────────┐
-                   │ Konfig-      │◀───│               │
-                   │ uration      │    └───────────────┘
-                   └──────────────┘
-                          │
-                          ▼
-                   ┌──────────────┐
-                   │ Abschluss    │
-                   └──────────────┘
+┌───────────────┐
+│ Disclaimer    │
+│ akzeptieren   │
+└───────┬───────┘
+        │
+        ▼
+┌───────────────┐    ┌──────────────┐    ┌───────────────┐
+│ System-       │───▶│ ComfyUI      │───▶│ Installation  │
+│ prüfung       │    │ Status       │    │ (optional)    │
+└───────────────┘    └──────────────┘    └───────────────┘
+                            │                    │
+                            │ (bereits installiert)
+                            ▼                    ▼
+                     ┌──────────────┐    ┌───────────────┐
+                     │ Konfig-      │◀───│               │
+                     │ uration      │    └───────────────┘
+                     │ + API Keys   │
+                     └──────────────┘
+                            │
+                            ▼
+                     ┌──────────────┐
+                     │ Abschluss    │
+                     │ (Neustart)   │
+                     └──────────────┘
 ```
 
 ---
@@ -167,8 +260,10 @@ Der Setup-Assistent führt neue Benutzer durch die Ersteinrichtung von CINDERGRA
 
 - `SystemDetector` (`services/system_detector.py`)
 - `ConfigManager` (`infrastructure/config_manager.py`)
+- `SettingsStore` (`infrastructure/settings_store.py`)
 - `HelpService` (`infrastructure/help_service.py`)
 - `HelpContext` (`infrastructure/help_ui.py`)
+- `ProjectStore` (`infrastructure/project_store.py`)
 
 ---
 
@@ -189,14 +284,22 @@ Der SystemDetector prüft folgende Abhängigkeiten:
 
 ## Configuration Saved
 
-Nach Abschluss des Setup werden folgende Werte in `config/settings.json` gespeichert:
+Nach Abschluss des Setup werden folgende Werte gespeichert:
 
+### In SettingsStore (SQLite, verschlüsselt)
+```
+setup_completed: true
+disclaimer_accepted_date: "26.12.2025 um 21:29 Uhr"
+civitai_api_key: (encrypted)
+huggingface_token: (encrypted)
+google_tts_api_key: (encrypted)
+```
+
+### In config/settings.json
 ```json
 {
   "comfy_url": "http://127.0.0.1:8188",
-  "comfy_root": "/path/to/ComfyUI",
-  "setup_completed": true,
-  "setup_completed_at": "2025-12-16T10:30:00"
+  "comfy_root": "/path/to/ComfyUI"
 }
 ```
 
@@ -206,44 +309,37 @@ Nach Abschluss des Setup werden folgende Werte in `config/settings.json` gespeic
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| "Pfad ungültig" | ComfyUI Verzeichnis existiert nicht | Pfad korrigieren |
-| "Verbindung fehlgeschlagen" | ComfyUI nicht erreichbar | ComfyUI starten |
-| "X erforderliche Abhängigkeit(en) fehlen" | System incomplete | Abhängigkeiten installieren |
+| "Invalid path" | ComfyUI directory doesn't exist | Correct the path |
+| "Connection failed" | ComfyUI not reachable | Start ComfyUI |
+| "X required dependency(ies) missing" | System incomplete | Install dependencies |
 
 ---
 
-## Installation Guides
+## Disclaimer Contents
 
-### Windows (Portable)
+The disclaimer covers:
 
-1. Download von GitHub Releases
-2. 7z entpacken
-3. `run_nvidia_gpu.bat` ausführen
-4. Browser öffnet `http://127.0.0.1:8188`
+1. **Disclaimer of Warranty** - Software provided "AS IS"
+2. **License - Private Use Only** - Non-commercial use only
+3. **Responsibility for AI-Generated Content** - User bears sole responsibility
+4. **Third-Party Models** - Comply with model license terms
+5. **Alpha/Beta Status** - Errors and data loss may occur
+6. **Indemnification** - User agrees to indemnify developers
 
-### Windows (Git)
+---
 
-```powershell
-git clone https://github.com/comfyanonymous/ComfyUI.git
-cd ComfyUI
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-python main.py
-```
+## Reset Setup
 
-### Linux
+Users can reset the setup wizard by:
 
-```bash
-git clone https://github.com/comfyanonymous/ComfyUI.git
-cd ComfyUI
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-python main.py --listen 127.0.0.1 --port 8188
-```
+1. Opening the Setup tab (after setup is complete)
+2. Checking "Setup Wizard erneut durchlaufen"
+3. Clicking "Setup Wizard neu starten"
+
+This will:
+- Delete `setup_completed` flag
+- Delete `disclaimer_accepted_date`
+- Reload the page to show the wizard again
 
 ---
 
@@ -251,9 +347,11 @@ python main.py --listen 127.0.0.1 --port 8188
 
 - `addons/setup_wizard.py` - Main addon file
 - `services/system_detector.py` - System detection service
+- `infrastructure/settings_store.py` - Encrypted settings storage
+- `infrastructure/config_manager.py` - Configuration manager
 - `infrastructure/help_service.py` - Help tooltips
 - `infrastructure/help_ui.py` - Help context
-- `config/settings.json` - Configuration storage
+- `infrastructure/project_store.py` - Project creation
 
 ---
 
@@ -261,7 +359,9 @@ python main.py --listen 127.0.0.1 --port 8188
 
 | Version | Date | Changes |
 |---------|------|---------|
-| v0.6.0 | 2025-12-16 | Initial implementation |
+| v0.6.1 | 2025-12-26 | Added collapsible disclaimer in "Setup completed" view |
+| v0.6.0 | 2025-12-16 | Added Disclaimer step, API keys, Example project creation |
+| v0.5.0 | 2025-12-16 | Initial implementation |
 
 ---
 

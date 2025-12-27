@@ -70,6 +70,20 @@ class UpdateAddon(BaseAddon):
         """
         update_available, version_info, message = self.updater.check_for_updates()
         current = self.updater.get_current_version()
+        verify_note = ""
+        if version_info:
+            verify_lines = []
+            if version_info.minisig_url:
+                verify_lines.append("✅ Minisign-Signatur gefunden")
+            else:
+                verify_lines.append("⚠️ Keine Minisign-Signatur im Release gefunden")
+
+            if version_info.sha256_url:
+                verify_lines.append("✅ SHA256-Asset gefunden")
+            else:
+                verify_lines.append("ℹ️ Kein SHA256-Asset gefunden")
+
+            verify_note = "\n**Verification:**\n" + "\n".join([f"- {line}" for line in verify_lines])
 
         if update_available and version_info:
             self._latest_version_info = version_info
@@ -79,6 +93,7 @@ class UpdateAddon(BaseAddon):
 **Neue Version:** v{version_info.version}
 
 Veröffentlicht: {version_info.published_at[:10] if version_info.published_at else 'Unbekannt'}
+{verify_note}
 """
             changelog_md = f"""### Changelog v{version_info.version}
 
@@ -94,7 +109,7 @@ Veröffentlicht: {version_info.published_at[:10] if version_info.published_at el
 
 **Aktuelle Version:** v{current}
 
-{message}
+{message}{verify_note}
 """
             changelog_md = f"""### Letzte Version: v{version_info.version}
 

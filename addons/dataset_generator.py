@@ -5,6 +5,7 @@ This addon generates training datasets for LoRA training by creating
 """
 import os
 import sys
+import subprocess
 from typing import List
 
 import gradio as gr
@@ -207,7 +208,7 @@ class DatasetGeneratorAddon(BaseAddon):
 
         def open_dataset_folder(path):
             if path and os.path.exists(path):
-                os.system(f'xdg-open "{path}"')
+                subprocess.run(["xdg-open", path], check=False)
             return "**Status:** 📁 Folder opened"
 
         generate_dataset_btn.click(

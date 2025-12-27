@@ -1,6 +1,7 @@
 """Addon for First/Last Frame Video Generation."""
 import os
 import sys
+import subprocess
 from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
@@ -352,7 +353,7 @@ class FirstLastVideoAddon(BaseAddon):
                 """Open the output folder."""
                 output_dir = self.service._get_output_dir()
                 os.makedirs(output_dir, exist_ok=True)
-                os.system(f'xdg-open "{output_dir}"')
+                subprocess.run(["xdg-open", output_dir], check=False)
                 return f"**Status:** 📁 Folder opened: {output_dir}"
 
             def set_as_default(workflow_file):

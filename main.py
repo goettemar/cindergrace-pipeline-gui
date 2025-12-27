@@ -61,7 +61,7 @@ def create_gui():
     }
     """
 
-    # Check if first run
+    # Check if first run (evaluated once at startup)
     config = ConfigManager()
     is_first_run = config.is_first_run()
 
@@ -120,10 +120,36 @@ def create_gui():
                 """)
 
         # Flat tabs - all addons in one row
+        # If first run, only Setup tab is functional - others show "setup required" message
         with gr.Tabs():
             for addon in addons:
                 with gr.Tab(addon.get_tab_name()):
-                    addon.render()
+                    # Allow Setup Wizard to render normally, block others on first run
+                    if is_first_run and addon.name != "Setup Wizard":
+                        gr.HTML("""
+                        <div style="
+                            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+                            color: white;
+                            padding: 40px;
+                            border-radius: 16px;
+                            text-align: center;
+                            margin: 40px auto;
+                            max-width: 600px;
+                            box-shadow: 0 8px 32px rgba(255, 107, 53, 0.3);
+                        ">
+                            <div style="font-size: 4em; margin-bottom: 20px;">🔒</div>
+                            <h2 style="margin: 0 0 16px 0;">Setup erforderlich</h2>
+                            <p style="margin: 0 0 24px 0; opacity: 0.95; font-size: 1.1em;">
+                                Bitte schließen Sie zuerst den <strong>Setup</strong>-Tab ab,<br>
+                                um CINDERGRACE zu konfigurieren.
+                            </p>
+                            <p style="margin: 0; opacity: 0.8; font-size: 0.9em;">
+                                Nach Abschluss des Setups starten Sie die App neu.
+                            </p>
+                        </div>
+                        """)
+                    else:
+                        addon.render()
 
         # Global log panel (below tabs)
         create_log_panel(lines=20, auto_refresh=True)
@@ -236,15 +262,34 @@ def main():
     # Enable queue for long-running operations (video generation can take 10+ minutes)
     demo.queue(default_concurrency_limit=1)
 
-    demo.launch(
-        server_name="127.0.0.1",
-        server_port=7860,
-        share=False,
-        show_error=True,
-        quiet=False,
-        css=css,
-        allowed_paths=allowed_paths
-    )
+    # Get port from environment or use default
+    port = int(os.environ.get("GRADIO_SERVER_PORT", 7860))
+
+    try:
+        demo.launch(
+            server_name="127.0.0.1",
+            server_port=port,
+            share=False,
+            show_error=True,
+            quiet=False,
+            css=css,
+            allowed_paths=allowed_paths
+        )
+    except OSError as e:
+        if "Cannot find empty port" in str(e) or "Address already in use" in str(e):
+            logger.error(f"Port {port} ist bereits belegt!")
+            print("\n" + "=" * 60)
+            print(f"❌ FEHLER: Port {port} ist bereits belegt!")
+            print("=" * 60)
+            print("\nMögliche Lösungen:")
+            print(f"  1. Andere CINDERGRACE-Instanz beenden (Ctrl+C)")
+            print(f"  2. Anderen Port verwenden:")
+            print(f"     GRADIO_SERVER_PORT=7861 ./start.sh")
+            print(f"  3. Prozess auf Port {port} finden und beenden:")
+            print(f"     lsof -i :{port}")
+            print("=" * 60 + "\n")
+            raise SystemExit(1)
+        raise
 
 
 if __name__ == "__main__":

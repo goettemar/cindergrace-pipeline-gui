@@ -476,7 +476,31 @@ class ModelDownloader:
         }
 
         normalized_type = type_mapping.get(model_type.lower(), model_type)
-        return self.models_root / normalized_type / filename
+        safe_name = self._sanitize_filename(filename)
+        target_dir = (self.models_root / normalized_type).resolve()
+        target_path = (target_dir / safe_name).resolve()
+
+        if os.path.commonpath([str(target_dir), str(target_path)]) != str(target_dir):
+            raise ValueError("Invalid filename resolves outside models root")
+
+        return target_path
+
+    def _sanitize_filename(self, filename: str) -> str:
+        """Normalize filename to prevent path traversal."""
+        if not filename:
+            raise ValueError("Empty filename")
+
+        safe_name = Path(filename).name
+        if safe_name in {"", ".", ".."}:
+            raise ValueError("Invalid filename")
+
+        if safe_name != filename:
+            logger.warning(f"Sanitized model filename from '{filename}' to '{safe_name}'")
+
+        if os.sep in safe_name or (os.altsep and os.altsep in safe_name):
+            raise ValueError("Invalid path separators in filename")
+
+        return safe_name
 
     def add_to_queue(
         self,
@@ -535,7 +559,15 @@ class ModelDownloader:
             if results:
                 task.status = DownloadStatus.FOUND
                 task.selected_result = self.get_best_result(results)
-                task.dest_path = str(self.get_target_path(task.model_type, task.filename))
+                try:
+                    task.dest_path = str(self.get_target_path(task.model_type, task.filename))
+                except ValueError as e:
+                    task.status = DownloadStatus.FAILED
+                    task.selected_result = None
+                    task.error_message = str(e)
+                    logger.warning(f"Invalid model filename '{task.filename}': {e}")
+                    self._notify_progress(task_id)
+                    return
             else:
                 task.status = DownloadStatus.NOT_FOUND
 

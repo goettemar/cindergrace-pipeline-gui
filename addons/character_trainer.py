@@ -7,6 +7,7 @@ Note: For dataset generation, use the Dataset Generator addon.
 """
 import os
 import sys
+import subprocess
 from typing import List, Optional
 
 import gradio as gr
@@ -553,7 +554,7 @@ class CharacterTrainerAddon(BaseAddon):
                 folder = os.path.join(self.config.get_comfy_root() or "", "models", "loras")
 
             if folder and os.path.exists(folder):
-                os.system(f'xdg-open "{folder}"')
+                subprocess.run(["xdg-open", folder], check=False)
             return "**Status:** 📁 Folder opened"
 
         def refresh_models(model_type_label):

@@ -41,18 +41,19 @@ class TestCharacterLoraDataclass:
 
 
 class TestLoadModelsFile:
-    """Test _load_models_file method"""
+    """Test _load_models_file method - returns (model_type, compatible_models) tuple"""
 
     @pytest.mark.unit
     def test_load_models_file_not_exists(self):
-        """Should return None when .models file doesn't exist"""
+        """Should return (None, None) when .models file doesn't exist"""
         service = CharacterLoraService()
-        result = service._load_models_file("/nonexistent/path.safetensors")
-        assert result is None
+        model_type, models = service._load_models_file("/nonexistent/path.safetensors")
+        assert model_type is None
+        assert models is None
 
     @pytest.mark.unit
     def test_load_models_file_empty(self):
-        """Should return None for empty .models file"""
+        """Should return (None, None) for empty .models file"""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.safetensors', delete=False) as sf:
             sf_path = sf.name
         models_path = sf_path.rsplit('.', 1)[0] + '.models'
@@ -63,8 +64,9 @@ class TestLoadModelsFile:
                 f.write("")
 
             service = CharacterLoraService()
-            result = service._load_models_file(sf_path)
-            assert result is None
+            model_type, models = service._load_models_file(sf_path)
+            assert model_type is None
+            assert models is None
         finally:
             os.unlink(sf_path)
             if os.path.exists(models_path):
@@ -86,12 +88,36 @@ class TestLoadModelsFile:
                 f.write("diffusion_models/flux1-krea-dev.safetensors\n")
 
             service = CharacterLoraService()
-            result = service._load_models_file(sf_path)
+            model_type, models = service._load_models_file(sf_path)
 
-            assert result is not None
-            assert len(result) == 2
-            assert "diffusion_models/flux1-dev.safetensors" in result
-            assert "diffusion_models/flux1-krea-dev.safetensors" in result
+            assert model_type is None  # No type= line in this test
+            assert models is not None
+            assert len(models) == 2
+            assert "diffusion_models/flux1-dev.safetensors" in models
+            assert "diffusion_models/flux1-krea-dev.safetensors" in models
+        finally:
+            os.unlink(sf_path)
+            if os.path.exists(models_path):
+                os.unlink(models_path)
+
+    @pytest.mark.unit
+    def test_load_models_file_with_type(self):
+        """Should parse type= line from .models file"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.safetensors', delete=False) as sf:
+            sf_path = sf.name
+        models_path = sf_path.rsplit('.', 1)[0] + '.models'
+
+        try:
+            with open(models_path, 'w') as f:
+                f.write("type=flux\n")
+                f.write("diffusion_models/flux1-dev.safetensors\n")
+
+            service = CharacterLoraService()
+            model_type, models = service._load_models_file(sf_path)
+
+            assert model_type == "flux"
+            assert models is not None
+            assert len(models) == 1
         finally:
             os.unlink(sf_path)
             if os.path.exists(models_path):
@@ -99,7 +125,7 @@ class TestLoadModelsFile:
 
     @pytest.mark.unit
     def test_load_models_file_only_comments(self):
-        """Should return None when file contains only comments"""
+        """Should return (None, None) when file contains only comments"""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.safetensors', delete=False) as sf:
             sf_path = sf.name
         models_path = sf_path.rsplit('.', 1)[0] + '.models'
@@ -110,8 +136,29 @@ class TestLoadModelsFile:
                 f.write("# Comment 2\n")
 
             service = CharacterLoraService()
-            result = service._load_models_file(sf_path)
-            assert result is None
+            model_type, models = service._load_models_file(sf_path)
+            assert model_type is None
+            assert models is None
+        finally:
+            os.unlink(sf_path)
+            if os.path.exists(models_path):
+                os.unlink(models_path)
+
+    @pytest.mark.unit
+    def test_load_models_file_type_only(self):
+        """Should return type without models when only type= is present"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.safetensors', delete=False) as sf:
+            sf_path = sf.name
+        models_path = sf_path.rsplit('.', 1)[0] + '.models'
+
+        try:
+            with open(models_path, 'w') as f:
+                f.write("type=sdxl\n")
+
+            service = CharacterLoraService()
+            model_type, models = service._load_models_file(sf_path)
+            assert model_type == "sdxl"
+            assert models is None
         finally:
             os.unlink(sf_path)
             if os.path.exists(models_path):

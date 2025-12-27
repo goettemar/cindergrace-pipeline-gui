@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 import json
 from copy import deepcopy
 from typing import Dict, Any, List, Tuple, Optional
@@ -648,7 +649,7 @@ Please check the settings before starting:
             return "**Status:** ❌ No active project. Please select one in the '📁 Project' tab."
         dest_dir = self.project_manager.ensure_dir(project_data, "video")
         os.makedirs(dest_dir, exist_ok=True)
-        os.system(f'xdg-open "{dest_dir}"')
+        subprocess.run(["xdg-open", dest_dir], check=False)
         return f"**Status:** 📁 Video-Folder opened ({dest_dir})"
 
     def _get_available_selection_files(self) -> List[str]:
