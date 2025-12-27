@@ -74,25 +74,25 @@ class UpdateAddon(BaseAddon):
         if version_info:
             verify_lines = []
             if version_info.minisig_url:
-                verify_lines.append("✅ Minisign-Signatur gefunden")
+                verify_lines.append("✅ Minisign signature found")
             else:
-                verify_lines.append("⚠️ Keine Minisign-Signatur im Release gefunden")
+                verify_lines.append("⚠️ No Minisign signature found in release")
 
             if version_info.sha256_url:
-                verify_lines.append("✅ SHA256-Asset gefunden")
+                verify_lines.append("✅ SHA256 asset found")
             else:
-                verify_lines.append("ℹ️ Kein SHA256-Asset gefunden")
+                verify_lines.append("ℹ️ No SHA256 asset found")
 
             verify_note = "\n**Verification:**\n" + "\n".join([f"- {line}" for line in verify_lines])
 
         if update_available and version_info:
             self._latest_version_info = version_info
-            status_md = f"""### ✨ Update verfügbar!
+            status_md = f"""### ✨ Update available!
 
-**Aktuelle Version:** v{current}
-**Neue Version:** v{version_info.version}
+**Current version:** v{current}
+**New version:** v{version_info.version}
 
-Veröffentlicht: {version_info.published_at[:10] if version_info.published_at else 'Unbekannt'}
+Published: {version_info.published_at[:10] if version_info.published_at else 'Unknown'}
 {verify_note}
 """
             changelog_md = f"""### Changelog v{version_info.version}
@@ -100,31 +100,31 @@ Veröffentlicht: {version_info.published_at[:10] if version_info.published_at el
 {version_info.body}
 
 ---
-[Release auf GitHub öffnen]({version_info.download_url})
+[Open release on GitHub]({version_info.download_url})
 """
-            return status_md, changelog_md, gr.update(interactive=True), f"📥 Update auf v{version_info.version}"
+            return status_md, changelog_md, gr.update(interactive=True), f"📥 Update to v{version_info.version}"
 
         elif version_info:
-            status_md = f"""### ✅ Bereits aktuell
+            status_md = f"""### ✅ You're up to date
 
-**Aktuelle Version:** v{current}
+**Current version:** v{current}
 
 {message}{verify_note}
 """
-            changelog_md = f"""### Letzte Version: v{version_info.version}
+            changelog_md = f"""### Latest version: v{version_info.version}
 
 {version_info.body}
 """
-            return status_md, changelog_md, gr.update(interactive=False), "📥 Kein Update verfügbar"
+            return status_md, changelog_md, gr.update(interactive=False), "📥 No update available"
 
         else:
-            status_md = f"""### ⚠️ Update-Check fehlgeschlagen
+            status_md = f"""### ⚠️ Update check failed
 
-**Aktuelle Version:** v{current}
+**Current version:** v{current}
 
 {message}
 """
-            return status_md, "", gr.update(interactive=False), "📥 Update nicht möglich"
+            return status_md, "", gr.update(interactive=False), "📥 Update unavailable"
 
     def _create_backup(self) -> str:
         """Create a backup and return status message."""
@@ -147,57 +147,59 @@ Veröffentlicht: {version_info.published_at[:10] if version_info.published_at el
     def _perform_update(self, progress=gr.Progress()) -> str:
         """Perform the update process."""
         if not self._latest_version_info:
-            return "❌ Kein Update-Info verfügbar. Bitte zuerst auf Updates prüfen."
+            return "❌ No update info available. Please check for updates first."
 
         version_info = self._latest_version_info
 
         # Step 1: Create backup
-        progress(0.1, desc="Erstelle Backup...")
+        progress(0.1, desc="Creating backup...")
         success, msg = self.updater.create_backup()
         if not success:
-            return f"❌ Backup fehlgeschlagen: {msg}"
+            return f"❌ Backup failed: {msg}"
 
         # Step 2: Download update
-        progress(0.3, desc="Lade Update herunter...")
+        progress(0.3, desc="Downloading update...")
         success, msg, download_path = self.updater.download_update(version_info)
         if not success or not download_path:
-            return f"❌ Download fehlgeschlagen: {msg}"
+            return f"❌ Download failed: {msg}"
 
         # Step 3: Apply update
-        progress(0.6, desc="Wende Update an...")
+        progress(0.6, desc="Applying update...")
         success, msg = self.updater.apply_update(download_path, version_info.version)
         if not success:
-            return f"❌ Update fehlgeschlagen: {msg}"
+            return f"❌ Update failed: {msg}"
 
         # Step 4: Update dependencies
-        progress(0.9, desc="Aktualisiere Dependencies...")
+        progress(0.9, desc="Updating dependencies...")
         success, dep_msg = self.updater.update_dependencies()
 
-        progress(1.0, desc="Fertig!")
+        progress(1.0, desc="Done!")
 
         if success:
-            return f"""✅ **Update auf v{version_info.version} erfolgreich!**
+            return f"""✅ **Update to v{version_info.version} successful!**
 
 {msg}
 
 **Dependencies:** {dep_msg}
 
-⚠️ **Bitte starte die GUI neu, um die Änderungen zu aktivieren.**
+## ⚠️ Restart Required
+
+Please restart the **`cindergrace_gui` application** (not just the browser).
 """
         else:
-            return f"""⚠️ **Update installiert, aber Dependencies-Problem:**
+            return f"""⚠️ **Update installed, but dependency issue:**
 
 {msg}
 
 **Dependencies:** {dep_msg}
 
-Bitte manuell ausführen: `pip install -r requirements.txt`
+Please run manually: `pip install -r requirements.txt`
 """
 
     def _perform_rollback(self, backup_selection: str) -> str:
         """Perform rollback to selected backup."""
         if not backup_selection:
-            return "❌ Bitte wähle ein Backup zum Wiederherstellen."
+            return "❌ Please select a backup to restore."
 
         backups = self.updater.get_available_backups()
         choices = self._get_backup_choices()
@@ -206,16 +208,18 @@ Bitte manuell ausführen: `pip install -r requirements.txt`
             idx = choices.index(backup_selection)
             backup = backups[idx]
         except (ValueError, IndexError):
-            return "❌ Backup nicht gefunden."
+            return "❌ Backup not found."
 
         success, msg = self.updater.rollback(backup)
 
         if success:
-            return f"""✅ **Rollback erfolgreich!**
+            return f"""✅ **Rollback successful!**
 
 {msg}
 
-⚠️ **Bitte starte die GUI neu, um die Änderungen zu aktivieren.**
+## ⚠️ Restart Required
+
+Please restart the **`cindergrace_gui` application** (not just the browser).
 """
         else:
             return f"❌ {msg}"
@@ -230,23 +234,23 @@ Bitte manuell ausführen: `pip install -r requirements.txt`
             header = gr.HTML(self._get_header_html())
 
             gr.Markdown("""
-Verwalte Updates, erstelle Backups und stelle vorherige Versionen wieder her.
+Manage updates, create backups, and restore previous versions.
             """)
 
             with gr.Row():
                 # Left column: Update check
                 with gr.Column(scale=1):
-                    gr.Markdown("### 🔍 Update-Check")
+                    gr.Markdown("### 🔍 Update Check")
 
-                    check_btn = gr.Button("🔍 Auf Updates prüfen", variant="primary", size="lg")
+                    check_btn = gr.Button("🔍 Check for updates", variant="primary", size="lg")
 
-                    status_md = gr.Markdown(f"""### Aktuelle Version: v{current_version}
+                    status_md = gr.Markdown(f"""### Current version: v{current_version}
 
-Klicke auf "Auf Updates prüfen" um nach neuen Versionen zu suchen.
+Click "Check for updates" to look for a new version.
 """)
 
                     update_btn = gr.Button(
-                        "📥 Kein Update verfügbar",
+                        "📥 No update available",
                         variant="secondary",
                         size="lg",
                         interactive=False,
@@ -259,7 +263,7 @@ Klicke auf "Auf Updates prüfen" um nach neuen Versionen zu suchen.
                     gr.Markdown("### 📋 Changelog")
 
                     changelog_md = gr.Markdown("""
-*Prüfe auf Updates, um den Changelog anzuzeigen.*
+*Check for updates to view the changelog.*
 """)
 
             gr.Markdown("---")
@@ -270,13 +274,13 @@ Klicke auf "Auf Updates prüfen" um nach neuen Versionen zu suchen.
                     gr.Markdown("### 💾 Backups")
 
                     with gr.Row():
-                        backup_btn = gr.Button("💾 Backup erstellen", variant="secondary")
+                        backup_btn = gr.Button("💾 Create backup", variant="secondary")
                         refresh_backups_btn = gr.Button("🔄", scale=0, min_width=50)
 
                     backup_status = gr.Markdown("")
 
                     backups_table = gr.Dataframe(
-                        headers=["Version", "Erstellt", "Größe", "Datei"],
+                        headers=["Version", "Created", "Size", "File"],
                         datatype=["str", "str", "str", "str"],
                         value=self._format_backups_table(backups),
                         interactive=False,
@@ -287,47 +291,47 @@ Klicke auf "Auf Updates prüfen" um nach neuen Versionen zu suchen.
                 with gr.Column(scale=1):
                     gr.Markdown("### ↩️ Rollback")
 
-                    gr.Markdown("Stelle eine frühere Version aus einem Backup wieder her:")
+                    gr.Markdown("Restore a previous version from a backup:")
 
                     rollback_dropdown = gr.Dropdown(
                         choices=self._get_backup_choices(),
-                        label="Backup auswählen",
+                        label="Select backup",
                         interactive=True,
                     )
 
                     rollback_btn = gr.Button(
-                        "↩️ Rollback durchführen",
+                        "↩️ Perform rollback",
                         variant="stop",
                     )
 
                     rollback_status = gr.Markdown("")
 
             # Info section
-            with gr.Accordion("ℹ️ Hinweise", open=False):
+            with gr.Accordion("ℹ️ Notes", open=False):
                 gr.Markdown(f"""
-### Backup-Strategie
+### Backup Strategy
 
-- Backups werden unter `~/.cindergrace/backups/` gespeichert
-- Nur Source-Code wird gesichert (~5-10 MB pro Backup)
-- `.venv`, `__pycache__`, `.git` werden **nicht** gesichert
-- Die letzten {self.updater._cleanup_old_backups.__defaults__} Backups werden aufbewahrt
+- Backups are stored under `~/.cindergrace/backups/`
+- Only source code is saved (~5-10 MB per backup)
+- `.venv`, `__pycache__`, `.git` are **not** included
+- The last {self.updater._cleanup_old_backups.__defaults__} backups are kept
 
-### Update-Prozess
+### Update Process
 
-1. **Backup erstellen** - Aktuelle Version wird automatisch gesichert
-2. **Download** - Neue Version von GitHub herunterladen
-3. **Installation** - Dateien aktualisieren (venv bleibt erhalten)
-4. **Dependencies** - `pip install -r requirements.txt` ausführen
-5. **Neustart** - GUI muss manuell neu gestartet werden
+1. **Create backup** - Current version is saved automatically
+2. **Download** - Fetch the new version from GitHub
+3. **Install** - Files are updated (venv stays intact)
+4. **Dependencies** - run `pip install -r requirements.txt`
+5. **Restart** - Restart the `cindergrace_gui` application (not just the browser)
 
 ### Rollback
 
-Bei Problemen mit einer neuen Version:
-1. Backup aus der Liste wählen
-2. "Rollback durchführen" klicken
-3. GUI neu starten
+If a new version causes issues:
+1. Choose a backup from the list
+2. Click "Perform rollback"
+3. Restart the `cindergrace_gui` application (not just the browser)
 
-**Hinweis:** Vor jedem Rollback wird automatisch ein Backup der aktuellen Version erstellt.
+**Note:** A backup of the current version is created automatically before each rollback.
 """)
 
             # Event handlers

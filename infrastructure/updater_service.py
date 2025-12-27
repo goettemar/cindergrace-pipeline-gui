@@ -124,7 +124,7 @@ class UpdaterService:
             latest_tag = data.get("tag_name", "").lstrip("v")
 
             if not latest_tag:
-                return False, None, "Konnte Version nicht ermitteln"
+                return False, None, "Unable to determine latest version"
 
             assets = data.get("assets", []) or []
             tarball_url, tarball_name, sha256_url, minisig_url, minisig_name = self._select_update_assets(
@@ -149,17 +149,17 @@ class UpdaterService:
             # Compare versions
             if self._version_compare(latest_tag, current) > 0:
                 logger.info(f"Update available: {current} -> {latest_tag}")
-                return True, version_info, f"Update verfügbar: v{latest_tag}"
+                return True, version_info, f"Update available: v{latest_tag}"
             else:
                 logger.info(f"Already up to date: {current}")
-                return False, version_info, f"Bereits aktuell (v{current})"
+                return False, version_info, f"Already up to date (v{current})"
 
         except urllib.error.URLError as e:
-            msg = f"Netzwerkfehler: {e.reason}"
+            msg = f"Network error: {e.reason}"
             logger.error(msg)
             return False, None, msg
         except Exception as e:
-            msg = f"Fehler beim Update-Check: {str(e)}"
+            msg = f"Update check failed: {str(e)}"
             logger.error(msg, exc_info=True)
             return False, None, msg
 
@@ -221,10 +221,10 @@ class UpdaterService:
             # Cleanup old backups
             self._cleanup_old_backups()
 
-            return True, f"Backup erstellt: {backup_name} ({size_mb:.1f} MB)"
+            return True, f"Backup created: {backup_name} ({size_mb:.1f} MB)"
 
         except Exception as e:
-            msg = f"Backup fehlgeschlagen: {str(e)}"
+            msg = f"Backup failed: {str(e)}"
             logger.error(msg, exc_info=True)
             return False, msg
 
@@ -318,7 +318,7 @@ class UpdaterService:
         logger.info(f"Rolling back to backup: {backup.path}")
 
         if not backup.path.exists():
-            return False, f"Backup nicht gefunden: {backup.path}"
+            return False, f"Backup not found: {backup.path}"
 
         try:
             # First, create a backup of current state
@@ -349,10 +349,10 @@ class UpdaterService:
                         shutil.copy2(item, dest)
 
             logger.info(f"Rollback complete to version {backup.version}")
-            return True, f"Rollback auf v{backup.version} erfolgreich"
+            return True, f"Rollback to v{backup.version} successful"
 
         except Exception as e:
-            msg = f"Rollback fehlgeschlagen: {str(e)}"
+            msg = f"Rollback failed: {str(e)}"
             logger.error(msg, exc_info=True)
             return False, msg
 
@@ -390,25 +390,25 @@ class UpdaterService:
                 minisig_path = download_dir / minisig_name
                 success, msg = self._download_asset(version_info.minisig_url, minisig_path, timeout=30)
                 if not success:
-                    return False, f"Signatur-Download fehlgeschlagen: {msg}", None
+                    return False, f"Signature download failed: {msg}", None
 
             if version_info.sha256_url:
                 verified, verify_msg = self._verify_sha256(download_path, version_info.sha256_url)
                 if not verified:
-                    return False, f"Hash-Check fehlgeschlagen: {verify_msg}", None
+                    return False, f"Hash check failed: {verify_msg}", None
 
             if version_info.minisig_url:
                 verified, verify_msg = self._verify_minisign(download_path, minisig_path)
                 if not verified:
-                    return False, f"Signatur-Check fehlgeschlagen: {verify_msg}", None
+                    return False, f"Signature check failed: {verify_msg}", None
 
             size_mb = download_path.stat().st_size / (1024 * 1024)
             logger.info(f"Download complete: {download_path} ({size_mb:.1f} MB)")
 
-            return True, f"Download abgeschlossen ({size_mb:.1f} MB)", download_path
+            return True, f"Download completed ({size_mb:.1f} MB)", download_path
 
         except Exception as e:
-            msg = f"Download fehlgeschlagen: {str(e)}"
+            msg = f"Download failed: {str(e)}"
             logger.error(msg, exc_info=True)
             return False, msg, None
 
@@ -428,7 +428,7 @@ class UpdaterService:
             # Create backup first
             success, msg = self.create_backup()
             if not success:
-                return False, f"Backup vor Update fehlgeschlagen: {msg}"
+                return False, f"Backup before update failed: {msg}"
 
             # Extract to temp directory
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -472,10 +472,10 @@ class UpdaterService:
             download_path.unlink()
 
             logger.info(f"Update applied successfully: v{version}")
-            return True, f"Update auf v{version} erfolgreich! Bitte GUI neu starten."
+            return True, f"Update to v{version} successful! Please restart the app."
 
         except Exception as e:
-            msg = f"Update fehlgeschlagen: {str(e)}"
+            msg = f"Update failed: {str(e)}"
             logger.error(msg, exc_info=True)
             return False, msg
 
@@ -508,14 +508,14 @@ class UpdaterService:
                 logger.info("Dependencies updated successfully")
                 return True, "Dependencies aktualisiert"
             else:
-                msg = f"pip install fehlgeschlagen: {result.stderr}"
+                msg = f"pip install failed: {result.stderr}"
                 logger.error(msg)
                 return False, msg
 
         except subprocess.TimeoutExpired:
-            return False, "Timeout beim Aktualisieren der Dependencies"
+            return False, "Timeout while updating dependencies"
         except Exception as e:
-            msg = f"Fehler beim Aktualisieren der Dependencies: {str(e)}"
+            msg = f"Failed to update dependencies: {str(e)}"
             logger.error(msg, exc_info=True)
             return False, msg
 
@@ -595,14 +595,14 @@ class UpdaterService:
     def _verify_minisign(self, download_path: Path, minisig_path: Optional[Path]) -> Tuple[bool, str]:
         """Verify download against minisign signature."""
         if not minisig_path or not minisig_path.exists():
-            return False, "Signaturdatei fehlt"
+            return False, "Signature file missing"
 
         if not shutil.which("minisign"):
             return False, "minisign nicht installiert"
 
         pubkey_path = self._get_public_key_path()
         if not pubkey_path.exists():
-            return False, f"Public-Key fehlt: {pubkey_path}"
+            return False, f"Public key missing: {pubkey_path}"
 
         result = subprocess.run(
             [
