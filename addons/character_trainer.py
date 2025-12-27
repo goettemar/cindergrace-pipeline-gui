@@ -18,12 +18,14 @@ from addons.base_addon import BaseAddon
 from addons.components import format_project_status
 from infrastructure.config_manager import ConfigManager
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 from services.lora_trainer_service import LoraTrainerService
 from services.kohya_trainer_service import (
     KohyaTrainerService,
     KohyaModelType,
     KohyaVRAMPreset,
     KohyaTrainingStatus,
+    KohyaTrainingProgress,
 )
 
 logger = get_logger(__name__)
@@ -66,6 +68,7 @@ class CharacterTrainerAddon(BaseAddon):
         self.config = ConfigManager()
         self.lora_service = LoraTrainerService(self.config)
         self.kohya_service = KohyaTrainerService(self.config)
+        self._job_store = JobStatusStore()
 
     def get_tab_name(self) -> str:
         return "🎭 LoRA"
@@ -279,6 +282,7 @@ class CharacterTrainerAddon(BaseAddon):
                     )
 
                     kohya_status = gr.Markdown("**Status:** Ready")
+                    job_status_md = gr.Markdown(self._get_training_job_status_md())
 
                     kohya_progress = gr.Slider(
                         minimum=0,
@@ -404,13 +408,13 @@ class CharacterTrainerAddon(BaseAddon):
             path = manual_path if manual_path else self._get_path_from_choice(dataset_dropdown)
 
             if not path or not os.path.exists(path):
-                return "**Status:** No valid dataset", 0, "", None, ""
+                return "**Status:** No valid dataset", 0, "", None, "", self._get_training_job_status_md()
 
             if not character_name or not character_name.strip():
-                return "**Status:** Charakter-Name fehlt", 0, "", None, ""
+                return "**Status:** Charakter-Name fehlt", 0, "", None, "", self._get_training_job_status_md()
 
             if not trigger_word or not trigger_word.strip():
-                return "**Status:** Trigger-Wort fehlt", 0, "", None, ""
+                return "**Status:** Trigger-Wort fehlt", 0, "", None, "", self._get_training_job_status_md()
 
             # Convert model type choice to enum
             model_type_value = "flux"
@@ -463,29 +467,61 @@ class CharacterTrainerAddon(BaseAddon):
                 )
 
                 if success:
+                    self._job_store.set_status(
+                        None,
+                        "lora_training",
+                        "running",
+                        message=f"Training started ({model_type_value.upper()})",
+                        metadata={
+                            "dataset": path,
+                            "character": character_name.strip(),
+                            "trigger": trigger_word.strip(),
+                            "model_type": model_type_value,
+                        },
+                    )
                     return (
                         f"**Status:** 🚀 {model_type_value.upper()} Training started...",
                         0,
                         "\n".join(log_lines[-50:]),
                         None,
-                        ""
+                        "",
+                        self._get_training_job_status_md()
                     )
                 else:
                     progress = self.kohya_service.get_progress()
+                    self._job_store.set_status(
+                        None,
+                        "lora_training",
+                        "failed",
+                        message=progress.error_message or "Training failed to start",
+                    )
                     return (
                         f"**Status:** Error: {progress.error_message}",
                         0,
                         "",
                         None,
-                        ""
+                        "",
+                        self._get_training_job_status_md()
                     )
             except Exception as e:
                 logger.error(f"Kohya training error: {e}", exc_info=True)
-                return f"**Status:** Error: {str(e)}", 0, "", None, ""
+                self._job_store.set_status(
+                    None,
+                    "lora_training",
+                    "failed",
+                    message=str(e),
+                )
+                return f"**Status:** Error: {str(e)}", 0, "", None, "", self._get_training_job_status_md()
 
         def cancel_kohya_training():
             self.kohya_service.cancel_training()
-            return "**Status:** ⏹️ Training cancelled"
+            self._job_store.set_status(
+                None,
+                "lora_training",
+                "cancelled",
+                message="Training cancelled",
+            )
+            return "**Status:** ⏹️ Training cancelled", self._get_training_job_status_md()
 
         def get_kohya_status():
             progress = self.kohya_service.get_progress()
@@ -546,12 +582,14 @@ class CharacterTrainerAddon(BaseAddon):
                     if lora_files:
                         lora_path = os.path.join(lora_dir, lora_files[0])
 
+            job_status = self._update_training_job_status(progress, progress_value)
             return (
                 f"**Status:** {status_text}",
                 progress_value,
                 "\n".join(logs),
                 sample_image,
-                lora_path
+                lora_path,
+                job_status
             )
 
         def open_kohya_lora_folder(lora_path):
@@ -620,12 +658,12 @@ class CharacterTrainerAddon(BaseAddon):
                 kohya_sample_every, kohya_sample_prompt,
                 kohya_base_model, kohya_t5xxl_model
             ],
-            outputs=[kohya_status, kohya_progress, kohya_log_output, kohya_sample_image, kohya_lora_path]
+            outputs=[kohya_status, kohya_progress, kohya_log_output, kohya_sample_image, kohya_lora_path, job_status_md]
         )
 
         kohya_cancel_btn.click(
             fn=cancel_kohya_training,
-            outputs=[kohya_status]
+            outputs=[kohya_status, job_status_md]
         )
 
         kohya_open_folder_btn.click(
@@ -644,7 +682,7 @@ class CharacterTrainerAddon(BaseAddon):
 
         kohya_timer.tick(
             fn=get_kohya_status,
-            outputs=[kohya_status, kohya_progress, kohya_log_output, kohya_sample_image, kohya_lora_path]
+            outputs=[kohya_status, kohya_progress, kohya_log_output, kohya_sample_image, kohya_lora_path, job_status_md]
         )
 
         kohya_timer.tick(
@@ -653,6 +691,47 @@ class CharacterTrainerAddon(BaseAddon):
         )
 
     # ==================== Helper Methods ====================
+
+    def _get_training_job_status_md(self) -> str:
+        """Return last training job status."""
+        status = self._job_store.get_status(None, "lora_training")
+        if not status:
+            return ""
+        updated = status.updated_at or "unknown time"
+        message = status.message or "No details"
+        return (
+            f"**Last training job:** `{status.status}`\n\n"
+            f"{message}\n\n"
+            f"_Last updated: {updated}_"
+        )
+
+    def _update_training_job_status(self, progress: KohyaTrainingProgress, progress_value: float) -> str:
+        """Persist current training status and return display text."""
+        status_map = {
+            KohyaTrainingStatus.IDLE: "idle",
+            KohyaTrainingStatus.PREPARING: "running",
+            KohyaTrainingStatus.RUNNING: "running",
+            KohyaTrainingStatus.COMPLETED: "completed",
+            KohyaTrainingStatus.CANCELLED: "cancelled",
+            KohyaTrainingStatus.ERROR: "failed",
+        }
+        status_key = status_map.get(progress.status, "unknown")
+        message = progress.error_message or ""
+        if progress.status == KohyaTrainingStatus.RUNNING:
+            message = f"Step {progress.current_step}/{progress.total_steps}"
+        elif progress.status == KohyaTrainingStatus.COMPLETED:
+            message = "Training completed"
+        elif progress.status == KohyaTrainingStatus.CANCELLED:
+            message = "Training cancelled"
+
+        self._job_store.set_status(
+            None,
+            "lora_training",
+            status_key,
+            message=message,
+            progress=progress_value,
+        )
+        return self._get_training_job_status_md()
 
     def _get_dataset_choices(self) -> List[str]:
         """Get available dataset choices for dropdown."""

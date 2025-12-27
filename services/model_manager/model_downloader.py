@@ -14,6 +14,7 @@ from urllib.parse import quote, urlparse
 import requests
 
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 
 logger = get_logger(__name__)
 
@@ -401,6 +402,7 @@ class ModelDownloader:
         self._executor: Optional[ThreadPoolExecutor] = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        self._job_store = JobStatusStore()
 
         # Progress callback: fn(task_id, task_dict)
         self.progress_callback: Optional[Callable[[str, Dict], None]] = None
@@ -636,6 +638,13 @@ class ModelDownloader:
             return
 
         logger.info(f"Starting download of {len(tasks_to_download)} models with {self.max_parallel} parallel downloads")
+        self._job_store.set_status(
+            None,
+            "model_downloads",
+            "running",
+            message=f"Downloading {len(tasks_to_download)} models",
+            metadata={"total": len(tasks_to_download)},
+        )
 
         # Use thread pool for parallel downloads
         self._executor = ThreadPoolExecutor(max_workers=self.max_parallel)
@@ -660,6 +669,23 @@ class ModelDownloader:
         finally:
             self._executor.shutdown(wait=False)
             self._executor = None
+            stats = self.get_statistics()
+            if self._stop_event.is_set():
+                status = "cancelled"
+                message = "Downloads cancelled"
+            elif stats.get("failed", 0) > 0:
+                status = "completed_with_issues"
+                message = f"Completed {stats.get('completed', 0)} downloads, {stats.get('failed', 0)} failed"
+            else:
+                status = "completed"
+                message = f"Completed {stats.get('completed', 0)} downloads"
+            self._job_store.set_status(
+                None,
+                "model_downloads",
+                status,
+                message=message,
+                metadata=stats,
+            )
 
     def _download_task(self, task_id: str):
         """Download a single task"""
@@ -757,6 +783,12 @@ class ModelDownloader:
         self._stop_event.set()
         if self._executor:
             self._executor.shutdown(wait=False, cancel_futures=True)
+        self._job_store.set_status(
+            None,
+            "model_downloads",
+            "cancelled",
+            message="Downloads cancelled",
+        )
 
     def clear_queue(self):
         """Clear the download queue"""

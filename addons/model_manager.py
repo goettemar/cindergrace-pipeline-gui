@@ -19,6 +19,7 @@ from addons.base_addon import BaseAddon
 from addons.components import format_project_status
 from infrastructure.config_manager import ConfigManager
 from infrastructure.logger import get_logger
+from infrastructure.job_status_store import JobStatusStore
 from services.model_manager import (
     WorkflowScanner,
     ModelScanner,
@@ -47,6 +48,7 @@ class ModelManagerAddon(BaseAddon):
             category="tools"
         )
         self.config = ConfigManager()
+        self._job_store = JobStatusStore()
 
         # Paths
         self.comfyui_root = None
@@ -430,6 +432,7 @@ class ModelManagerAddon(BaseAddon):
                     "Check `logs/pipeline.log` for progress."
                 )
 
+                job_status_md = gr.Markdown(self._get_download_job_status_md())
                 download_status_text = gr.Markdown("**Status:** Run 'Analyze Models' first to identify missing models")
 
                 download_progress = gr.Progress()
@@ -622,13 +625,13 @@ Diese Informationen werden im Keyframe Generator verwendet, um die richtigen Mod
             download_all_btn.click(
                 fn=self.download_all_found,
                 inputs=[],
-                outputs=[download_status_text, download_table]
+                outputs=[download_status_text, download_table, job_status_md]
             )
 
             cancel_downloads_btn.click(
                 fn=self.cancel_downloads,
                 inputs=[],
-                outputs=[download_status_text]
+                outputs=[download_status_text, job_status_md]
             )
 
             # Workflow Model Requirements Event Handlers
@@ -1377,14 +1380,14 @@ Click 'Download All Found' to start downloading."""
             logger.error(f"Search failed: {e}", exc_info=True)
             return f"**❌ Error:** {str(e)}", []
 
-    def download_all_found(self) -> Tuple[str, List]:
+    def download_all_found(self) -> Tuple[str, List, str]:
         """Download all models that were found"""
         if not self.model_downloader:
-            return "**⚠️ Run 'Search Missing Models' first**", []
+            return "**⚠️ Run 'Search Missing Models' first**", [], self._get_download_job_status_md()
 
         stats = self.model_downloader.get_statistics()
         if stats['found'] == 0:
-            return "**⚠️ No models found to download**", []
+            return "**⚠️ No models found to download**", [], self._get_download_job_status_md()
 
         try:
             logger.info(f"Starting download of {stats['found']} models...")
@@ -1415,23 +1418,36 @@ Click 'Download All Found' to start downloading."""
 
 Downloads are running in the background. Refresh to see progress."""
 
-            return status_msg, table_data
+            return status_msg, table_data, self._get_download_job_status_md()
 
         except Exception as e:
             logger.error(f"Download failed: {e}", exc_info=True)
-            return f"**❌ Error:** {str(e)}", []
+            return f"**❌ Error:** {str(e)}", [], self._get_download_job_status_md()
 
-    def cancel_downloads(self) -> str:
+    def cancel_downloads(self) -> Tuple[str, str]:
         """Cancel all running downloads"""
         if not self.model_downloader:
-            return "**⚠️ No downloads to cancel**"
+            return "**⚠️ No downloads to cancel**", self._get_download_job_status_md()
 
         try:
             self.model_downloader.cancel_downloads()
-            return "**⏹️ Downloads cancelled**"
+            return "**⏹️ Downloads cancelled**", self._get_download_job_status_md()
         except Exception as e:
             logger.error(f"Cancel failed: {e}")
-            return f"**❌ Error:** {str(e)}"
+            return f"**❌ Error:** {str(e)}", self._get_download_job_status_md()
+
+    def _get_download_job_status_md(self) -> str:
+        """Return last model download job status."""
+        status = self._job_store.get_status(None, "model_downloads")
+        if not status:
+            return ""
+        updated = status.updated_at or "unknown time"
+        message = status.message or "No details"
+        return (
+            f"**Last download job:** `{status.status}`\n\n"
+            f"{message}\n\n"
+            f"_Last updated: {updated}_"
+        )
 
     def _download_queue_to_table(self, queue_status: Dict) -> List:
         """Convert download queue to table format"""
