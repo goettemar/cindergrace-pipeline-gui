@@ -82,7 +82,11 @@ class LipsyncAddon(BaseAddon):
     def render(self) -> gr.Blocks:
         with gr.Blocks() as interface:
             # Unified header: Tab name left, no project relation
-            gr.HTML(format_project_status(tab_name="🎤 Lipsync Studio", no_project_relation=True))
+            gr.HTML(format_project_status(
+                tab_name="🎤 Lipsync Studio",
+                no_project_relation=True,
+                include_remote_warning=True,
+            ))
 
             gr.Markdown(
                 "Create lip-synced videos from audio and character images. "

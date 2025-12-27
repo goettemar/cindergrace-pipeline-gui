@@ -48,6 +48,7 @@ class UpdateAddon(BaseAddon):
             project_slug=None,
             tab_name="🔄 Update Manager",
             no_project_relation=True,
+            include_remote_warning=True,
         )
 
     def _format_backups_table(self, backups: List[BackupInfo]) -> List[List[str]]:

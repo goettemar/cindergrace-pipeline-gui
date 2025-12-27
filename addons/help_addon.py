@@ -24,7 +24,11 @@ class HelpAddon(BaseAddon):
     def render(self) -> gr.Blocks:
         with gr.Blocks() as interface:
             # Unified header: Tab name left, no project relation
-            gr.HTML(format_project_status(tab_name="❓ Help & Workflows", no_project_relation=True))
+            gr.HTML(format_project_status(
+                tab_name="❓ Help & Workflows",
+                no_project_relation=True,
+                include_remote_warning=True,
+            ))
 
             with gr.Tabs():
                 with gr.Tab("Workflow Overview"):

@@ -38,7 +38,11 @@ class TestComfyFluxAddon(BaseAddon):
 
         with gr.Blocks() as interface:
             # Unified header: Tab name left, no project relation
-            gr.HTML(format_project_status(tab_name="🧪 ComfyUI Test Panel", no_project_relation=True))
+            gr.HTML(format_project_status(
+                tab_name="🧪 ComfyUI Test Panel",
+                no_project_relation=True,
+                include_remote_warning=True,
+            ))
 
             # Get backend info for display
             backend = self.config.get_active_backend()

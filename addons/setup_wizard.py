@@ -31,7 +31,11 @@ class SetupWizardAddon(BaseAddon):
     def render(self) -> gr.Blocks:
         with gr.Blocks() as interface:
             # Unified header: Tab name left, no project relation
-            gr.HTML(format_project_status(tab_name="🛠️ Setup Wizard", no_project_relation=True))
+            gr.HTML(format_project_status(
+                tab_name="🛠️ Setup Wizard",
+                no_project_relation=True,
+                include_remote_warning=True,
+            ))
 
             # Check if setup is already completed (static check at render time)
             from infrastructure.settings_store import get_settings_store

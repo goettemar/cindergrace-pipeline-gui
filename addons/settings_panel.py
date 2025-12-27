@@ -1,6 +1,7 @@
 """Global settings addon for configuring ComfyUI + workflow presets"""
 import os
 import sys
+from urllib.parse import urlparse
 import gradio as gr
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,11 +32,32 @@ class SettingsAddon(BaseAddon):
     def get_tab_name(self) -> str:
         return "⚙️ Settings"
 
+    def _get_remote_backend_warning(self, url: str) -> str:
+        """Return a warning if the backend URL is non-local."""
+        if not url:
+            return ""
+
+        parsed = urlparse(url)
+        host = parsed.hostname
+        local_hosts = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+        if host in local_hosts:
+            return ""
+
+        return (
+            "⚠️ **Remote backend in use**\n\n"
+            "Outputs are generated on a remote server. Avoid sensitive inputs and "
+            "ensure you trust the backend."
+        )
+
 
     def render(self) -> gr.Blocks:
         with gr.Blocks() as interface:
             # Unified header: Tab name left, no project relation
-            gr.HTML(format_project_status(tab_name="⚙️ Pipeline Settings", no_project_relation=True))
+            gr.HTML(format_project_status(
+                tab_name="⚙️ Pipeline Settings",
+                no_project_relation=True,
+                include_remote_warning=True,
+            ))
 
             # Backend Selection Section
             with gr.Group():
@@ -65,6 +87,7 @@ class SettingsAddon(BaseAddon):
                     test_btn = gr.Button("🧪 Test", scale=0)
 
                 backend_status = gr.Markdown("")
+                backend_warning = gr.Markdown(self._get_remote_backend_warning(active.get("url", "")))
 
             # RunPod Quick Connect
             with gr.Accordion("🚀 RunPod Quick Connect", open=False):
@@ -229,19 +252,19 @@ class SettingsAddon(BaseAddon):
             activate_runpod_btn.click(
                 fn=self.activate_runpod,
                 inputs=[runpod_id],
-                outputs=[runpod_status, current_url, current_type]
+                outputs=[runpod_status, current_url, current_type, backend_warning]
             )
 
             use_local_btn.click(
                 fn=self.use_local_backend,
                 inputs=[],
-                outputs=[runpod_status, current_url, current_type]
+                outputs=[runpod_status, current_url, current_type, backend_warning]
             )
 
             save_local_btn.click(
                 fn=self.save_local_backend,
                 inputs=[local_url, local_root],
-                outputs=[local_status]
+                outputs=[local_status, backend_warning]
             )
 
             refresh_workflows_btn.click(
@@ -427,7 +450,7 @@ class SettingsAddon(BaseAddon):
         """Activate RunPod backend with given Pod-ID."""
         try:
             if not pod_id or not pod_id.strip():
-                return ("**❌ Pod-ID required**", gr.update(), gr.update())
+                return ("**❌ Pod-ID required**", gr.update(), gr.update(), gr.update())
 
             pod_id = pod_id.strip()
             url = f"https://{pod_id}-8188.proxy.runpod.net"
@@ -439,11 +462,12 @@ class SettingsAddon(BaseAddon):
             return (
                 f"**✅ RunPod activated**\n\nPod-ID: `{pod_id}`",
                 url,
-                f"🚀 RunPod (Pod: {pod_id})"
+                f"🚀 RunPod (Pod: {pod_id})",
+                self._get_remote_backend_warning(url),
             )
         except Exception as e:
             logger.error(f"Failed to activate RunPod: {e}")
-            return (f"**❌ Error:** {e}", gr.update(), gr.update())
+            return (f"**❌ Error:** {e}", gr.update(), gr.update(), gr.update())
 
     def use_local_backend(self):
         """Switch back to local backend."""
@@ -456,11 +480,12 @@ class SettingsAddon(BaseAddon):
             return (
                 "**✅ Local backend activated**",
                 url,
-                "🖥️ Local"
+                "🖥️ Local",
+                self._get_remote_backend_warning(url),
             )
         except Exception as e:
             logger.error(f"Failed to switch to local: {e}")
-            return (f"**❌ Error:** {e}", gr.update(), gr.update())
+            return (f"**❌ Error:** {e}", gr.update(), gr.update(), gr.update())
 
     def test_connection(self):
         """Test connection to active backend."""
@@ -497,10 +522,12 @@ class SettingsAddon(BaseAddon):
             )
 
             logger.info(f"Updated local backend: URL={validated.comfy_url}")
-            return "**✅ Local backend updated**"
+            active = self.config.get_active_backend()
+            active_url = active.get("url", "")
+            return "**✅ Local backend updated**", self._get_remote_backend_warning(active_url)
         except Exception as e:
             logger.error(f"Failed to save local backend: {e}")
-            return f"**❌ Error:** {e}"
+            return f"**❌ Error:** {e}", gr.update()
 
     def save_settings(self, comfy_url: str, comfy_root: str) -> str:
         """Legacy method for backward compatibility."""
@@ -513,7 +540,10 @@ class SettingsAddon(BaseAddon):
             return f"**❌ Error:** {exc}"
 
         if hasattr(self.config, "update_backend"):
-            return self.save_local_backend(validated.comfy_url, validated.comfy_root)
+            result = self.save_local_backend(validated.comfy_url, validated.comfy_root)
+            if isinstance(result, tuple):
+                return result[0]
+            return result
 
         self.config.set("comfy_url", validated.comfy_url)
         self.config.set("comfy_root", validated.comfy_root)

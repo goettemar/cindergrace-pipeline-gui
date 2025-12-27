@@ -32,6 +32,7 @@ def format_project_status(
     show_path: bool = False,
     project_path: Optional[str] = None,
     no_project_relation: bool = False,
+    include_remote_warning: bool = False,
 ) -> str:
     """Format project status as a unified header bar with flexbox layout.
 
@@ -81,6 +82,10 @@ def format_project_status(
 
         project_status = " │ ".join(parts)
 
+    remote_label = _get_remote_backend_label() if include_remote_warning else ""
+    if remote_label:
+        project_status = f"{project_status} │ {remote_label}"
+
     # Build tab name (left side)
     tab_display = tab_name or ""
 
@@ -96,6 +101,7 @@ def format_project_status_from_dict(
     tab_name: Optional[str] = None,
     extra_info: Optional[List[Tuple[str, str]]] = None,
     show_path: bool = False,
+    include_remote_warning: bool = False,
 ) -> str:
     """Format project status from a project dictionary.
 
@@ -112,7 +118,12 @@ def format_project_status_from_dict(
         Formatted HTML string
     """
     if not project:
-        return format_project_status(None, None, tab_name=tab_name)
+        return format_project_status(
+            None,
+            None,
+            tab_name=tab_name,
+            include_remote_warning=include_remote_warning,
+        )
 
     return format_project_status(
         project_name=project.get("name"),
@@ -121,6 +132,7 @@ def format_project_status_from_dict(
         extra_info=extra_info,
         show_path=show_path,
         project_path=project.get("path"),
+        include_remote_warning=include_remote_warning,
     )
 
 
@@ -227,6 +239,7 @@ def format_project_status_extended(
     show_storyboard: bool = True,
     show_resolution: bool = True,
     show_path: bool = False,
+    include_remote_warning: bool = True,
 ) -> str:
     """Build extended project status with storyboard, resolution, and path.
 
@@ -251,7 +264,12 @@ def format_project_status_extended(
     project = project_store.get_active_project(refresh=True) if project_store else None
 
     if not project:
-        return format_project_status(None, None, tab_name=tab_name)
+        return format_project_status(
+            None,
+            None,
+            tab_name=tab_name,
+            include_remote_warning=include_remote_warning,
+        )
 
     extra_info = []
 
@@ -288,7 +306,27 @@ def format_project_status_extended(
         extra_info=extra_info if extra_info else None,
         show_path=False,  # We handle path in extra_info
         project_path=project.get("path"),
+        include_remote_warning=include_remote_warning,
     )
+
+
+def _get_remote_backend_label() -> str:
+    """Return a badge label if a remote ComfyUI backend is configured."""
+    try:
+        from urllib.parse import urlparse
+        from infrastructure.config_manager import ConfigManager
+
+        url = ConfigManager().get_comfy_url()
+        if not url:
+            return ""
+
+        host = urlparse(url).hostname
+        local_hosts = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+        if host in local_hosts:
+            return ""
+        return "🌐 Remote backend"
+    except Exception:
+        return ""
 
 
 def shorten_storyboard_path(abs_path: Optional[str]) -> str:

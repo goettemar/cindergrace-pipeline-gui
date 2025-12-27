@@ -74,7 +74,8 @@ class CharacterTrainerAddon(BaseAddon):
         with gr.Blocks() as interface:
             gr.HTML(format_project_status(
                 tab_name="🎭 Kohya LoRA Training",
-                no_project_relation=True
+                no_project_relation=True,
+                include_remote_warning=True,
             ))
 
             gr.Markdown(

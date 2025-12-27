@@ -629,8 +629,13 @@ class StoryboardEditorAddon(BaseAddon):
         tab_name = "📝 Storyboard Editor"
         project = self.project_store.get_active_project(refresh=True)
         if not project:
-            return format_project_status(None, None, tab_name=tab_name)
-        return format_project_status(project.get("name"), project.get("slug"), tab_name=tab_name)
+            return format_project_status(None, None, tab_name=tab_name, include_remote_warning=True)
+        return format_project_status(
+            project.get("name"),
+            project.get("slug"),
+            tab_name=tab_name,
+            include_remote_warning=True,
+        )
 
     @handle_errors("Failed to refresh files")
     def _refresh_storyboard_files(self) -> Tuple[gr.Dropdown, str]:
