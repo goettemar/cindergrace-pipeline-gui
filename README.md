@@ -1,5 +1,7 @@
 # CINDERGRACE Pipeline GUI
 
+> Hinweis: Dieses Repository ist ein Hobby-/Experimentierprojekt. Es handelt sich nicht um ein gewerbliches Angebot (keine Auftragsannahme, keine Garantien, kein Supportversprechen).
+
 [![CI](https://github.com/goettemar/cindergrace-pipeline-gui/workflows/CI/badge.svg)](https://github.com/goettemar/cindergrace-pipeline-gui/actions)
 [![codecov](https://codecov.io/gh/goettemar/cindergrace-pipeline-gui/branch/main/graph/badge.svg)](https://codecov.io/gh/goettemar/cindergrace-pipeline-gui)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
